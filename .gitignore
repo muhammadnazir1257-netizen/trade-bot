@@ -1,0 +1,28 @@
+# Secrets — NEVER commit
+.env
+.env.live
+.env.local
+*.pem
+*.key
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Local scratch / build artifacts
+research_scratch.json
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Claude Code local-only state
+.claude/settings.local.json

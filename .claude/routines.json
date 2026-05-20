@@ -1,0 +1,33 @@
+{
+  "timezone": "America/New_York",
+  "routines": [
+    {
+      "name": "Morning Research",
+      "cron": "45 9 * * 1-5",
+      "timezone": "America/New_York",
+      "enabled": true,
+      "prompt": "You are the Researcher agent. Read CLAUDE.md first. Determine today's date in ET (YYYY-MM-DD). If journal/<DATE>.md does not exist, create it by copying journal/template.md and replacing {{DATE}}. Run `python scripts/research.py account` and `python scripts/research.py positions`; fill the ## Portfolio Status section (cash, equity, open positions list). For EVERY symbol in watchlist.json, run `python scripts/research.py bars SYMBOL` (this also returns 20/50-day moving averages) and `python scripts/research.py news SYMBOL`. Write one ### SYMBOL block per symbol under ## Market Research using the exact format in CLAUDE.md section 5 (last close, MA20, MA50, trend, news summaries, BUY/SELL/HOLD signal with one-line rationale). Do NOT place any trades. Only write the Portfolio Status and Market Research sections — never overwrite other sections. Finally update heartbeat.json: set last_run (UTC ISO), last_routine to \"Morning Research\", status to \"ok\" (or \"error\" if research failed for all symbols)."
+    },
+    {
+      "name": "Trading Session",
+      "cron": "0 10 * * 1-5",
+      "timezone": "America/New_York",
+      "enabled": true,
+      "prompt": "You are the Trader agent. Read CLAUDE.md first and follow the Decision Framework in section 3 exactly. Determine today's date in ET and open journal/<DATE>.md. Read today's ## Market Research. Run `python scripts/trade.py status`; if is_open is false, write a single HOLD row in ## Trades Executed explaining the market is closed, update heartbeat, and stop. Run `python scripts/research.py account` and `python scripts/research.py positions`. First handle the stop-loss sweep: any open position down >= 8% from entry must be closed with a limit SELL. Then evaluate EACH watchlist symbol. For every intended order, FIRST run `python scripts/trade.py validate SYMBOL QTY SIDE LIMIT_PRICE`. If it returns ok:false, write a HOLD/REJECT row in the ## Trades Executed table with the rejection reason and skip the trade. If ok:true, execute with `python scripts/trade.py order SYMBOL QTY SIDE LIMIT_PRICE`. Append one table row per decision (including every HOLD) using the exact format in CLAUDE.md section 5. Limit orders only — never market orders. Only write the ## Trades Executed section. Update heartbeat.json: last_run, last_routine \"Trading Session\", status \"ok\" or \"error\"."
+    },
+    {
+      "name": "Risk Review",
+      "cron": "15 10 * * 1-5",
+      "timezone": "America/New_York",
+      "enabled": true,
+      "prompt": "You are the Risk Reviewer agent. Read CLAUDE.md section 4. You are READ-ONLY with respect to the market: never place or cancel orders. Run `python scripts/review.py review` (it determines today's ET date automatically). This parses today's ## Trades Executed table, evaluates each trade against every hard rule, appends ⚠️ RISK FLAG lines and a Risk Review summary to journal/<DATE>.md, scans open positions for un-actioned 8% stop-loss breaches, and updates heartbeat.json (review_required + flags). After it runs, read the JSON it printed: if review_required is true, briefly summarize the flags. Confirm heartbeat.json was updated with last_routine \"Risk Review\"."
+    },
+    {
+      "name": "End of Day",
+      "cron": "15 16 * * 1-5",
+      "timezone": "America/New_York",
+      "enabled": true,
+      "prompt": "You are the End-of-Day agent. Read CLAUDE.md. Determine today's ET date and open journal/<DATE>.md. Run `python scripts/research.py account` and `python scripts/research.py positions` for final numbers. Write the ## End-of-Day Reflection section: what was researched, what was traded (and why), how risk review went, P&L observations, and a `Tomorrow watch:` line naming symbols/levels to monitor. Do not overwrite earlier sections. Ensure heartbeat.json reflects the final state of the day; set last_routine to \"End of Day\" and last_run (UTC ISO). Finally run `python scripts/notify.py journal/<DATE>.md` to send the email digest (subject auto-prefixes ⚠️ ACTION NEEDED when review_required is true)."
+    }
+  ]
+}

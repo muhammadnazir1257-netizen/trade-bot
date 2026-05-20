@@ -1,0 +1,9 @@
+# Runtime dependencies for the trading agent system.
+# Pinned to known-good ranges; bump deliberately.
+
+requests>=2.31,<3.0
+python-dotenv>=1.0,<2.0
+sendgrid>=6.11,<7.0
+
+# tzdata is only required on Windows for zoneinfo("America/New_York") to resolve.
+tzdata>=2024.1; sys_platform == "win32"

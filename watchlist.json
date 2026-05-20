@@ -1,0 +1,12 @@
+{
+  "watchlist": [
+    { "symbol": "SPY", "description": "S&P 500 ETF — baseline market exposure", "max_allocation_pct": 15 },
+    { "symbol": "QQQ", "description": "Nasdaq ETF — tech sector exposure", "max_allocation_pct": 10 },
+    { "symbol": "NVDA", "description": "GPU/AI infrastructure — high conviction", "max_allocation_pct": 8 },
+    { "symbol": "AAPL", "description": "Large cap tech — stability anchor", "max_allocation_pct": 8 },
+    { "symbol": "MSFT", "description": "Cloud/enterprise — AI infrastructure play", "max_allocation_pct": 8 }
+  ],
+  "cash_reserve_pct": 20,
+  "stop_loss_pct": 8,
+  "max_single_position_pct": 5
+}
