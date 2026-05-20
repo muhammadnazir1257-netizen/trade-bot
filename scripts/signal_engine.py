@@ -1,0 +1,327 @@
+"""Signal aggregator.
+
+Runs every active strategy on a symbol, applies regime + accuracy-based
+weights, and emits a composite signal only when the weighted consensus
+exceeds ``config.CONSENSUS_THRESHOLD``. Position sizing here.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import sys
+from datetime import datetime, timezone
+from typing import Any
+
+import numpy as np
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+for _d in (_HERE, _ROOT):
+    if _d not in sys.path:
+        sys.path.insert(0, _d)
+
+import indicators as ind  # noqa: E402
+import config             # noqa: E402
+from strategies import STRATEGIES, market_regime  # noqa: E402
+
+
+def run_all_strategies(symbol: str, bars_1m: list, bars_5m: list, bars_1d: list,
+                       account: dict, positions: list) -> list[dict[str, Any]]:
+    """Run every active strategy on a symbol and return their raw signals.
+
+    A strategy that raises is logged to stderr and skipped — never aborts the
+    others.
+    """
+    out: list[dict[str, Any]] = []
+    for mod in STRATEGIES:
+        try:
+            sig = mod.analyze(symbol, bars_1m, bars_5m, bars_1d, account, positions)
+            if isinstance(sig, dict) and "signal" in sig:
+                out.append(sig)
+            else:
+                print(f"[signal_engine] {getattr(mod,'NAME','?')} returned malformed signal",
+                      file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 — keep other strategies running
+            print(f"[signal_engine] strategy {getattr(mod,'NAME','?')} failed: {exc}",
+                  file=sys.stderr)
+    return out
+
+
+def aggregate_signals(signals: list[dict[str, Any]], regime: str,
+                      regime_weights: dict[str, float] | None = None,
+                      pattern_boost: float = 0.0) -> dict[str, Any]:
+    """Weighted vote across strategy signals.
+
+    ``regime_weights`` overlays on top of ``config.STRATEGY_WEIGHTS``.
+    ``pattern_boost`` is in [-PATTERN_BOOST_MAX, +PATTERN_BOOST_MAX] and
+    nudges composite confidence in the direction it suggests.
+
+    Returns a composite signal with the same shape as a strategy output, plus
+    a ``components`` list of the contributing strategies.
+    """
+    if not signals:
+        return _hold("no_strategy_signals_received")
+
+    accuracy = _load_accuracy_tracker()
+    base = config.STRATEGY_WEIGHTS
+    regime_w = regime_weights or {}
+
+    weights_buy = 0.0
+    weights_sell = 0.0
+    weights_hold = 0.0
+    total_weight = 0.0
+    components: list[dict[str, Any]] = []
+
+    # Aggregate stop/take levels per direction (weighted by per-voter weight)
+    buy_entry, buy_stop, buy_tp, buy_w = 0.0, 0.0, 0.0, 0.0
+    sell_entry, sell_stop, sell_tp, sell_w = 0.0, 0.0, 0.0, 0.0
+
+    for sig in signals:
+        name = sig.get("strategy", "?")
+        base_w = base.get(name, 1.0)
+        regime_mult = regime_w.get(name, 1.0)
+        acc_mult = _accuracy_multiplier(accuracy.get(name, {}))
+        conf = float(sig.get("confidence", 0.0))
+        # Combined weight for this vote
+        w = base_w * regime_mult * acc_mult * max(conf, 0.05)
+        total_weight += w
+        if sig["signal"] == "BUY":
+            weights_buy += w
+            buy_entry += (sig.get("entry_price") or 0.0) * w
+            buy_stop += (sig.get("stop_loss") or 0.0) * w
+            buy_tp += (sig.get("take_profit") or 0.0) * w
+            buy_w += w
+        elif sig["signal"] == "SELL":
+            weights_sell += w
+            sell_entry += (sig.get("entry_price") or 0.0) * w
+            sell_stop += (sig.get("stop_loss") or 0.0) * w
+            sell_tp += (sig.get("take_profit") or 0.0) * w
+            sell_w += w
+        else:
+            weights_hold += w
+
+        components.append({
+            "strategy": name,
+            "signal": sig["signal"],
+            "confidence": conf,
+            "weight": w,
+            "reason": sig.get("reason", ""),
+            "entry_price": sig.get("entry_price"),
+            "stop_loss": sig.get("stop_loss"),
+            "take_profit": sig.get("take_profit"),
+        })
+
+    if total_weight <= 0:
+        return _hold("zero_total_weight")
+
+    buy_share = weights_buy / total_weight
+    sell_share = weights_sell / total_weight
+
+    # In TRENDING_DOWN regime, only allow SELLs (cash preservation)
+    if regime == "TRENDING_DOWN" and buy_share > sell_share:
+        composite_signal = "HOLD"
+        composite_conf = 0.0
+        reason = "TRENDING_DOWN regime suppresses BUY signals"
+        return _compose(composite_signal, composite_conf, reason, components, None, None, None)
+
+    if buy_share >= max(config.CONSENSUS_THRESHOLD, sell_share):
+        composite_signal = "BUY"
+        composite_conf = min(1.0, buy_share + pattern_boost)
+        if buy_w > 0:
+            entry_price = buy_entry / buy_w
+            stop = buy_stop / buy_w if buy_stop > 0 else None
+            tp = buy_tp / buy_w if buy_tp > 0 else None
+        else:
+            entry_price, stop, tp = None, None, None
+        reason = f"BUY consensus {buy_share:.2%}; pattern_boost {pattern_boost:+.3f}"
+        return _compose(composite_signal, composite_conf, reason, components,
+                        entry_price, stop, tp)
+
+    if sell_share >= max(config.CONSENSUS_THRESHOLD, buy_share):
+        composite_signal = "SELL"
+        composite_conf = min(1.0, sell_share + abs(min(pattern_boost, 0.0)))
+        if sell_w > 0:
+            entry_price = sell_entry / sell_w
+            stop = sell_stop / sell_w if sell_stop > 0 else None
+            tp = sell_tp / sell_w if sell_tp > 0 else None
+        else:
+            entry_price, stop, tp = None, None, None
+        reason = f"SELL consensus {sell_share:.2%}; pattern_boost {pattern_boost:+.3f}"
+        return _compose(composite_signal, composite_conf, reason, components,
+                        entry_price, stop, tp)
+
+    return _compose("HOLD", 0.0,
+                    f"no consensus (BUY {buy_share:.2%}, SELL {sell_share:.2%})",
+                    components, None, None, None)
+
+
+def calculate_position_size(signal: dict[str, Any], account: dict,
+                            regime: str, atr_value: float | None,
+                            symbol: str, watchlist: dict | None = None) -> dict[str, Any]:
+    """Kelly-ish position sizing under the policy.
+
+    Returns ``{"qty": float, "notional": float, "pct_of_equity": float, "reason": str}``.
+    ``qty`` rounds DOWN to whole shares.
+    """
+    equity = float(account.get("equity", 0.0) or 0.0)
+    cash = float(account.get("cash", 0.0) or 0.0)
+    if equity <= 0:
+        return {"qty": 0, "notional": 0.0, "pct_of_equity": 0.0,
+                "reason": "no equity available"}
+
+    confidence = float(signal.get("confidence", 0.0))
+    price = float(signal.get("entry_price") or 0.0)
+    if price <= 0:
+        return {"qty": 0, "notional": 0.0, "pct_of_equity": 0.0,
+                "reason": "no entry price on signal"}
+
+    # Base sizing
+    pct = config.BASE_POSITION_PCT
+    if confidence >= 0.80 and regime in ("TRENDING_UP", "TRENDING_DOWN"):
+        pct = config.MAX_POSITION_PCT
+    if regime == "HIGH_VOLATILITY":
+        pct = config.MIN_POSITION_PCT
+
+    # Respect the per-symbol max_allocation_pct from watchlist
+    if watchlist:
+        entries = {e["symbol"].upper(): e for e in watchlist.get("watchlist", [])}
+        sym_cap = entries.get(symbol.upper(), {}).get(
+            "max_allocation_pct", config.MAX_POSITION_PCT * 100)
+        pct = min(pct, sym_cap / 100.0)
+
+    # ATR-based volatility scaling: tighter risk in high ATR → smaller size
+    if atr_value and atr_value > 0:
+        atr_pct = atr_value / price
+        if atr_pct > 0.05:        # >5% ATR — exceptionally volatile
+            pct *= 0.5
+
+    target_notional = pct * equity
+
+    # Cash reserve enforcement
+    min_cash = config.CASH_RESERVE_PCT * equity
+    max_notional_cash = max(0.0, cash - min_cash)
+    if target_notional > max_notional_cash:
+        target_notional = max_notional_cash
+
+    qty = math.floor(target_notional / price)
+    notional = qty * price
+    return {
+        "qty": int(qty),
+        "notional": float(notional),
+        "pct_of_equity": float(notional / equity) if equity else 0.0,
+        "reason": (f"size {pct*100:.2f}% of equity (conf {confidence:.2f}, regime {regime}) "
+                   f"→ {qty} shares × ${price:.2f} = ${notional:,.2f}"),
+    }
+
+
+def update_accuracy_tracker(symbol: str, strategy: str, signal: str,
+                            outcome: str, pnl_pct: float = 0.0) -> dict[str, Any]:
+    """Record a trade outcome for a strategy.
+
+    ``outcome`` should be ``"WIN"`` or ``"LOSS"``. ``pnl_pct`` is the realised
+    return on the position (e.g. 0.018 = +1.8%). Persisted to
+    ``models/accuracy_tracker.json``.
+    """
+    path = os.path.join(_ROOT, config.ACCURACY_TRACKER_PATH)
+    tracker = _load_accuracy_tracker()
+    record = tracker.get(strategy, {"wins": 0, "losses": 0, "pnl_sum": 0.0,
+                                    "trades": [], "updated_at": None})
+    if outcome == "WIN":
+        record["wins"] = int(record.get("wins", 0)) + 1
+    elif outcome == "LOSS":
+        record["losses"] = int(record.get("losses", 0)) + 1
+    record["pnl_sum"] = float(record.get("pnl_sum", 0.0)) + float(pnl_pct)
+    record["trades"] = (record.get("trades", []) + [{
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "symbol": symbol,
+        "signal": signal,
+        "outcome": outcome,
+        "pnl_pct": float(pnl_pct),
+    }])[-200:]   # keep last 200 trades per strategy
+    record["updated_at"] = datetime.now(timezone.utc).isoformat()
+    tracker[strategy] = record
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(tracker, fh, indent=2)
+    except OSError as exc:
+        print(f"[signal_engine] could not write accuracy tracker: {exc}", file=sys.stderr)
+    return record
+
+
+# --- Internal helpers ------------------------------------------------------
+
+
+def _accuracy_multiplier(record: dict) -> float:
+    """Return a weight multiplier in [0.5, 1.5] based on this strategy's
+    historical win rate, falling back to 1.0 when too few trades exist."""
+    wins = int(record.get("wins", 0))
+    losses = int(record.get("losses", 0))
+    total = wins + losses
+    if total < config.ACCURACY_MIN_TRADES:
+        return 1.0
+    win_rate = wins / total
+    # 0.5 win rate → 1.0; 0.7 → ~1.4; 0.3 → ~0.6 (linear scale, clamped)
+    return float(max(0.5, min(1.5, 0.5 + win_rate)))
+
+
+def _load_accuracy_tracker() -> dict[str, Any]:
+    path = os.path.join(_ROOT, config.ACCURACY_TRACKER_PATH)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def _compose(signal: str, confidence: float, reason: str,
+             components: list[dict], entry_price, stop, tp) -> dict[str, Any]:
+    return {
+        "signal": signal,
+        "confidence": float(confidence),
+        "reason": reason,
+        "strategy": "composite",
+        "entry_price": entry_price,
+        "stop_loss": stop,
+        "take_profit": tp,
+        "components": components,
+    }
+
+
+def _hold(reason: str) -> dict[str, Any]:
+    return _compose("HOLD", 0.0, reason, [], None, None, None)
+
+
+# --- CLI entry point for quick dry-run inspection --------------------------
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Run signal engine on a symbol (dry-run).")
+    parser.add_argument("symbol", help="ticker to analyse")
+    args = parser.parse_args()
+
+    # Pull data using existing research.py helpers
+    import research  # type: ignore  # adjacent script
+    bars_1m = research.get_bars(args.symbol, timeframe="1Min", limit=200)
+    bars_5m = research.get_bars(args.symbol, timeframe="5Min", limit=200)
+    bars_1d = research.get_bars(args.symbol, timeframe="1Day", limit=120)
+    account = research.get_account()
+    positions = research.get_positions()
+    spy_bars_1d = bars_1d if args.symbol.upper() == "SPY" else research.get_bars("SPY", limit=120)
+
+    regime = market_regime.classify(spy_bars_1d)
+    signals = run_all_strategies(args.symbol, bars_1m, bars_5m, bars_1d, account, positions)
+    composite = aggregate_signals(signals, regime["regime"], regime["weights"])
+    print(json.dumps({
+        "symbol": args.symbol.upper(),
+        "regime": regime,
+        "components": [
+            {"strategy": s["strategy"], "signal": s["signal"],
+             "confidence": s["confidence"], "reason": s["reason"]}
+            for s in signals
+        ],
+        "composite": {k: v for k, v in composite.items() if k != "components"},
+    }, indent=2))
