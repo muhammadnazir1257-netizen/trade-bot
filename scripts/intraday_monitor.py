@@ -519,8 +519,14 @@ def run_iteration() -> dict[str, Any]:
             position = positions_by_sym[symbol.upper()]
             meta = state.setdefault("positions_meta", {}).setdefault(symbol.upper(), {})
             last_bar = (bars_1m or bars_5m or [{"c": position.get("current_price", 0)}])[-1]
-            decision = monitor_position(symbol, position, last_bar, atr_value or 0.0, meta)
-            if decision in ("CLOSE_STOP", "CLOSE_PROFIT", "CLOSE_TIME"):
+            # In the close-only window, force-flatten everything (no overnight
+            # exposure) unless this position is explicitly flagged as a swing.
+            if (phase == "close_only" and not config.OVERNIGHT_ALLOWED
+                    and not meta.get("swing", False)):
+                decision = "CLOSE_EOD"
+            else:
+                decision = monitor_position(symbol, position, last_bar, atr_value or 0.0, meta)
+            if decision in ("CLOSE_STOP", "CLOSE_PROFIT", "CLOSE_TIME", "CLOSE_EOD"):
                 current_price = float(position.get("current_price") or last_bar.get("c", 0))
                 qty_held = float(position.get("qty", 0))     # signed
                 if qty_held != 0 and current_price > 0:
