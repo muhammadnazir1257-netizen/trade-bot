@@ -102,10 +102,14 @@ def get_bars(symbol: str, timeframe: str = "1Day", limit: int = 60) -> list[dict
     Returns:
         List of bar dicts with keys t, o, h, l, c, v. Empty list on no data.
     """
-    # Alpaca's bars endpoint defaults to a narrow recent window without `start`,
-    # so request ~1.5x the calendar days needed to comfortably cover `limit`
-    # trading days (accounts for weekends/holidays).
-    days_back = max(int(limit * 1.6), 7) if "Day" in timeframe else max(int(limit / 4), 1)
+    # Fetch the MOST RECENT `limit` bars with enough history depth:
+    #   - `start` opens a lookback window wide enough to contain `limit` bars
+    #   - `sort=desc` returns newest-first within that window (capped at limit)
+    #   - reverse() restores chronological order
+    # `start` + default ascending sort returns the OLDEST bars in the window
+    # (day-stale intraday data); `sort=desc` with no `start` returns only the
+    # current day (too little history). Both together is correct.
+    days_back = _lookback_days(timeframe, limit)
     start = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         data = _request(
@@ -115,15 +119,33 @@ def get_bars(symbol: str, timeframe: str = "1Day", limit: int = 60) -> list[dict
                 "timeframe": timeframe,
                 "limit": limit,
                 "start": start,
+                "sort": "desc",
                 "feed": DATA_FEED,
                 "adjustment": "raw",
             },
         )
         bars = data.get("bars") or []
+        bars.reverse()  # newest-first → chronological (oldest-first)
         return bars
     except RuntimeError as exc:
         _log(f"get_bars({symbol}) error: {exc}")
         return []
+
+
+def _lookback_days(timeframe: str, limit: int) -> int:
+    """Estimate calendar days needed to contain ``limit`` bars of ``timeframe``.
+
+    Accounts for ~390 trading minutes/day and weekends (×1.7 buffer).
+    """
+    tf = timeframe.lower()
+    if "day" in tf or "week" in tf or "month" in tf:
+        return max(int(limit * 1.6), 7)
+    import re
+    m = re.match(r"(\d+)\s*(min|hour)", tf)
+    mult = int(m.group(1)) if m else 1
+    minutes_per_bar = mult * (60 if "hour" in tf else 1)
+    trading_days_needed = (limit * minutes_per_bar) / 390.0
+    return max(int(trading_days_needed * 1.7) + 2, 3)
 
 
 def get_account() -> dict[str, Any]:

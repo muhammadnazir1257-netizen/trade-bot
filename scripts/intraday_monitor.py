@@ -295,7 +295,10 @@ def monitor_position(symbol: str, position: dict, current_bar: dict,
     ``"CLOSE_TIME"``. ``meta`` is the per-symbol state dict and is mutated in
     place (trailing stop, peak price).
     """
-    current_price = float(current_bar.get("c", position.get("current_price", 0)))
+    # Use the broker's authoritative mark for stop/target decisions; the bar
+    # close is only a fallback. Bars can lag or be stale on the free feed, and
+    # acting on a phantom price can fire a false stop on a winning position.
+    current_price = float(position.get("current_price") or current_bar.get("c", 0))
     qty = float(position.get("qty", 0))
     if qty <= 0 or current_price <= 0:
         return "HOLD"
@@ -459,7 +462,7 @@ def run_iteration() -> dict[str, Any]:
             last_bar = (bars_1m or bars_5m or [{"c": position.get("current_price", 0)}])[-1]
             decision = monitor_position(symbol, position, last_bar, atr_value or 0.0, meta)
             if decision in ("CLOSE_STOP", "CLOSE_PROFIT", "CLOSE_TIME"):
-                current_price = float(last_bar.get("c", position.get("current_price", 0)))
+                current_price = float(position.get("current_price") or last_bar.get("c", 0))
                 qty_held = float(position.get("qty", 0))
                 if qty_held > 0 and current_price > 0:
                     limit_price = round(current_price * 0.998, 2)  # sell just below market
