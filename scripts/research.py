@@ -33,8 +33,14 @@ load_dotenv()
 
 TRADING_BASE = os.environ.get("APCA_BASE_URL", "https://paper-api.alpaca.markets").rstrip("/")
 DATA_BASE = os.environ.get("APCA_DATA_URL", "https://data.alpaca.markets").rstrip("/")
+CRYPTO_DATA_BASE = os.environ.get("CRYPTO_DATA_URL", "https://data.alpaca.markets").rstrip("/")
 DATA_FEED = os.environ.get("ALPACA_DATA_FEED", "iex")
 HTTP_TIMEOUT = int(os.environ.get("ALPACA_HTTP_TIMEOUT", "30"))
+
+
+def is_crypto(symbol: str) -> bool:
+    """Crypto symbols are pair-formatted (e.g. ``BTC/USD``)."""
+    return "/" in (symbol or "")
 
 
 def _log(message: str) -> None:
@@ -111,6 +117,29 @@ def get_bars(symbol: str, timeframe: str = "1Day", limit: int = 60) -> list[dict
     # current day (too little history). Both together is correct.
     days_back = _lookback_days(timeframe, limit)
     start = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if is_crypto(symbol):
+        # Crypto uses the v1beta3 endpoint; bars are keyed by symbol and there
+        # is no feed/adjustment parameter. Markets are 24/7.
+        try:
+            data = _request(
+                CRYPTO_DATA_BASE,
+                "/v1beta3/crypto/us/bars",
+                params={
+                    "symbols": symbol.upper(),
+                    "timeframe": timeframe,
+                    "limit": limit,
+                    "start": start,
+                    "sort": "desc",
+                },
+            )
+            bars = (data.get("bars") or {}).get(symbol.upper(), [])
+            bars.reverse()
+            return bars
+        except RuntimeError as exc:
+            _log(f"get_bars({symbol}) crypto error: {exc}")
+            return []
+
     try:
         data = _request(
             DATA_BASE,

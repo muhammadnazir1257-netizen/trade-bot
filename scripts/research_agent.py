@@ -326,6 +326,145 @@ def tune_strategy_params(strategy_module, symbol: str) -> dict[str, Any]:
     return {"strategy": name, "symbol": symbol, "best": best, "runs": runs}
 
 
+# --- Out-of-sample edge discovery -----------------------------------------
+
+
+def _simulate(strategy_module, symbol: str, bars_5m: list, bars_1m: list,
+              bars_1d: list) -> list[dict]:
+    """Replay ``bars_5m`` through a strategy, returning closed trades with
+    cost-adjusted return_pct. Shared by the OOS discovery report."""
+    trades: list[dict] = []
+    open_trade = None
+    slippage = 2 * (config.SLIPPAGE_BPS / 10000.0)
+    warmup = 60
+    for i in range(warmup, len(bars_5m)):
+        window = bars_5m[: i + 1]
+        try:
+            sig = strategy_module.analyze(symbol, bars_1m, window, bars_1d, {}, [])
+        except Exception:
+            continue
+        bar = window[-1]
+        high, low = float(bar.get("h", bar["c"])), float(bar.get("l", bar["c"]))
+        if open_trade:
+            if open_trade["side"] == "BUY":
+                if low <= open_trade["stop"]:
+                    open_trade["exit"] = open_trade["stop"]; trades.append(open_trade); open_trade = None
+                elif high >= open_trade["tp"]:
+                    open_trade["exit"] = open_trade["tp"]; trades.append(open_trade); open_trade = None
+            else:
+                if high >= open_trade["stop"]:
+                    open_trade["exit"] = open_trade["stop"]; trades.append(open_trade); open_trade = None
+                elif low <= open_trade["tp"]:
+                    open_trade["exit"] = open_trade["tp"]; trades.append(open_trade); open_trade = None
+        if open_trade is None and sig.get("signal") in ("BUY", "SELL") \
+                and sig.get("entry_price") and sig.get("stop_loss") and sig.get("take_profit"):
+            open_trade = {"side": sig["signal"], "entry": float(sig["entry_price"]),
+                          "stop": float(sig["stop_loss"]), "tp": float(sig["take_profit"])}
+    for t in trades:
+        if t["side"] == "BUY":
+            r = (t["exit"] - t["entry"]) / t["entry"]
+        else:
+            r = (t["entry"] - t["exit"]) / t["entry"]
+        t["return_pct"] = r - slippage
+    return trades
+
+
+def _edge_stats(trades: list[dict]) -> dict:
+    """Win rate, profit factor, Sharpe, total return from a trades list."""
+    if not trades:
+        return {"trades": 0, "win_rate": None, "profit_factor": None,
+                "sharpe": None, "total_return_pct": 0.0}
+    pnl = np.array([t["return_pct"] for t in trades], dtype=float)
+    wins = pnl[pnl > 0]; losses = pnl[pnl <= 0]
+    gp, gl = float(np.sum(wins)), float(-np.sum(losses))
+    pf = gp / gl if gl > 0 else (2.0 if gp > 0 else 0.0)
+    sharpe = float(pnl.mean() / pnl.std(ddof=0) * math.sqrt(252)) if pnl.std(ddof=0) > 0 else 0.0
+    return {"trades": len(trades), "win_rate": float(len(wins) / len(pnl)),
+            "profit_factor": pf, "sharpe": sharpe, "total_return_pct": float(np.sum(pnl))}
+
+
+def discover_edges() -> dict:
+    """Walk-forward edge discovery: split each strategy×symbol backtest into
+    in-sample (first OOS_SPLIT_FRACTION) and out-of-sample (the rest). A
+    strategy "has edge" only if it clears the win-rate + profit-factor gates
+    **out-of-sample** — the honest test that defends against overfitting.
+
+    Writes research/edge_discovery_<date>.md and returns the ranked summary.
+    """
+    wl = _load(config.WATCHLIST_PATH).get("watchlist", [])
+    results: list[dict] = []
+    for entry in wl:
+        sym = entry["symbol"]
+        bars_5m = research.get_bars(sym, timeframe="5Min", limit=2000)
+        if len(bars_5m) < 300:
+            continue
+        bars_1m = research.get_bars(sym, timeframe="1Min", limit=400)
+        bars_1d = research.get_bars(sym, timeframe="1Day", limit=120)
+        split = int(len(bars_5m) * config.OOS_SPLIT_FRACTION)
+        for mod in STRATEGIES:
+            try:
+                is_trades = _simulate(mod, sym, bars_5m[:split], bars_1m, bars_1d)
+                oos_trades = _simulate(mod, sym, bars_5m[split:], bars_1m, bars_1d)
+            except Exception as exc:  # noqa: BLE001
+                continue
+            is_stats = _edge_stats(is_trades)
+            oos_stats = _edge_stats(oos_trades)
+            has_edge = bool(
+                oos_stats["win_rate"] is not None
+                and oos_stats["win_rate"] >= config.EDGE_MIN_WINRATE
+                and (oos_stats["profit_factor"] or 0) >= config.EDGE_MIN_PROFIT_FACTOR
+                and oos_stats["trades"] >= 5
+            )
+            results.append({"symbol": sym, "strategy": mod.NAME,
+                            "in_sample": is_stats, "out_of_sample": oos_stats,
+                            "has_edge": has_edge})
+
+    edges = [r for r in results if r["has_edge"]]
+    edges.sort(key=lambda r: (r["out_of_sample"]["profit_factor"] or 0), reverse=True)
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    lines = [f"# Edge Discovery Report — {today}", "",
+             "Out-of-sample test: in-sample = first "
+             f"{int(config.OOS_SPLIT_FRACTION*100)}% of bars, OOS = the rest. "
+             "A strategy only counts as having edge if it clears "
+             f"win-rate ≥ {config.EDGE_MIN_WINRATE:.0%} and profit factor ≥ "
+             f"{config.EDGE_MIN_PROFIT_FACTOR} **out-of-sample** (overfit defense).",
+             "", f"Cost model: {config.SLIPPAGE_BPS} bps slippage/side.", "",
+             "## Strategies with out-of-sample edge"]
+    if edges:
+        for r in edges:
+            o = r["out_of_sample"]; i = r["in_sample"]
+            lines.append(
+                f"- **{r['strategy']} on {r['symbol']}** — OOS: {o['trades']} trades, "
+                f"win {o['win_rate']:.0%}, PF {o['profit_factor']:.2f}, "
+                f"Sharpe {o['sharpe']:.2f} | IS PF {i['profit_factor'] or 0:.2f}")
+    else:
+        lines.append("- None. No strategy/symbol pair cleared the out-of-sample "
+                     "edge gate. This is the *expected* result for textbook "
+                     "strategies on efficient markets — keep paper-trading and "
+                     "let the live accuracy tracker accumulate.")
+    lines += ["", "## Full grid (all pairs, OOS win/PF)"]
+    results.sort(key=lambda r: (r["out_of_sample"]["profit_factor"] or 0), reverse=True)
+    for r in results:
+        o = r["out_of_sample"]
+        wr = f"{o['win_rate']:.0%}" if o["win_rate"] is not None else "n/a"
+        pf = f"{o['profit_factor']:.2f}" if o["profit_factor"] is not None else "n/a"
+        flag = " ✅" if r["has_edge"] else ""
+        lines.append(f"- {r['strategy']}/{r['symbol']}: OOS {o['trades']}t, win {wr}, PF {pf}{flag}")
+
+    notes_dir = _path("research")
+    os.makedirs(notes_dir, exist_ok=True)
+    out_path = os.path.join(notes_dir, f"edge_discovery_{today}.md")
+    try:
+        with open(out_path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        print(f"[research_agent] could not write edge report: {exc}", file=sys.stderr)
+    return {"edges_found": len(edges), "pairs_tested": len(results),
+            "report": out_path,
+            "top_edges": [f"{r['strategy']}/{r['symbol']}" for r in edges[:10]]}
+
+
 # --- Weekly report --------------------------------------------------------
 
 
@@ -401,7 +540,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Research / backtest / tune.")
     parser.add_argument("action", choices=("news", "backtest", "backtest-all",
-                                            "tune", "weekly"))
+                                            "tune", "weekly", "discover"))
     parser.add_argument("--symbol", default=None)
     parser.add_argument("--strategy", default=None)
     args = parser.parse_args()
@@ -430,3 +569,5 @@ if __name__ == "__main__":
         print(json.dumps(tune_strategy_params(mod, args.symbol), indent=2))
     elif args.action == "weekly":
         print(generate_weekly_report())
+    elif args.action == "discover":
+        print(json.dumps(discover_edges(), indent=2))

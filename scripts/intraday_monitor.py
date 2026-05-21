@@ -393,24 +393,26 @@ def run_iteration() -> dict[str, Any]:
         _update_heartbeat("halted")
         return entry
 
-    if phase in ("pre_open", "post_close"):
+    watchlist = _load_watchlist()
+    symbols = [e["symbol"] for e in watchlist.get("watchlist", [])]
+    has_crypto = any(research.is_crypto(s) for s in symbols)
+    equities_open = phase in ("warmup", "active", "close_only")
+
+    # Skip only when equities are closed AND there is no 24/7 crypto to trade.
+    if not equities_open and not has_crypto:
         entry = {"timestamp": iter_ts, "phase": phase, "skipped": "market_closed",
                  "signals": [], "open_positions": []}
         _append_log(entry)
         _update_heartbeat("idle")
         return entry
 
-    watchlist = _load_watchlist()
-    symbols = [e["symbol"] for e in watchlist.get("watchlist", [])]
-
     state = _load_state()
+    account = research.get_account()
     if state.get("start_equity") is None:
-        account = research.get_account()
         state["start_equity"] = float(account.get("equity", 0.0))
-    else:
-        account = research.get_account()
     positions_list = research.get_positions()
-    positions_by_sym = {p["symbol"].upper(): p for p in positions_list}
+    # Key by normalized symbol so "BTC/USD" (orders) matches "BTCUSD" (positions).
+    positions_by_sym = {p["symbol"].upper().replace("/", ""): p for p in positions_list}
 
     # Daily-loss kill switch
     ks_status = kill_switch.check_daily_loss(state["start_equity"], float(account.get("equity", 0.0)))
@@ -437,6 +439,11 @@ def run_iteration() -> dict[str, Any]:
     placed_orders: list[dict[str, Any]] = []
 
     for symbol in symbols:
+        sym_crypto = research.is_crypto(symbol)
+        sym_key = symbol.upper().replace("/", "")
+        # Equity symbols only trade during market hours; crypto trades 24/7.
+        if not sym_crypto and not equities_open:
+            continue
         bars_1m = research.get_bars(symbol, timeframe="1Min", limit=200)
         bars_5m = research.get_bars(symbol, timeframe="5Min", limit=200)
         bars_1d = daily_bars_by_symbol.get(symbol.upper()) or research.get_bars(symbol, timeframe="1Day", limit=120)
@@ -463,12 +470,14 @@ def run_iteration() -> dict[str, Any]:
         action_taken = "NONE"
         order_info: dict[str, Any] | None = None
 
-        # ENTRY — long on BUY, short on SELL. Only when flat in this symbol,
-        # in active phase, under the daily cap, and on fresh data.
-        if (phase == "active"
+        # ENTRY — long on BUY, short on SELL. Equities only in the active phase;
+        # crypto any time the monitor runs. Flat in this symbol, under the daily
+        # cap, and on fresh data.
+        can_enter_phase = sym_crypto or phase == "active"
+        if (can_enter_phase
                 and composite["signal"] in ("BUY", "SELL")
                 and state.get("trades_today", 0) < config.MAX_DAILY_TRADES
-                and symbol.upper() not in positions_by_sym):
+                and sym_key not in positions_by_sym):
             if not data_fresh:
                 action_taken = "SKIPPED:stale_data"
             else:
@@ -498,7 +507,7 @@ def run_iteration() -> dict[str, Any]:
                                 action_taken = "SHORT_OPENED" if side == "sell" else "ORDER_PLACED"
                                 placed_orders.append(order)
                                 state["trades_today"] = int(state.get("trades_today", 0)) + 1
-                                state.setdefault("positions_meta", {})[symbol.upper()] = {
+                                state.setdefault("positions_meta", {})[sym_key] = {
                                     "direction": "long" if side == "buy" else "short",
                                     "entry_time": datetime.now(timezone.utc).isoformat(),
                                     "entry_price": entry_price,
@@ -515,14 +524,14 @@ def run_iteration() -> dict[str, Any]:
                             action_taken = f"REJECTED:{why}"
 
         # MANAGE existing position — long or short
-        if symbol.upper() in positions_by_sym:
-            position = positions_by_sym[symbol.upper()]
-            meta = state.setdefault("positions_meta", {}).setdefault(symbol.upper(), {})
+        if sym_key in positions_by_sym:
+            position = positions_by_sym[sym_key]
+            meta = state.setdefault("positions_meta", {}).setdefault(sym_key, {})
             last_bar = (bars_1m or bars_5m or [{"c": position.get("current_price", 0)}])[-1]
-            # In the close-only window, force-flatten everything (no overnight
-            # exposure) unless this position is explicitly flagged as a swing.
+            # In the close-only window, force-flatten EQUITIES (no overnight
+            # exposure) unless flagged swing. Crypto trades 24/7 — never EOD-flattened.
             if (phase == "close_only" and not config.OVERNIGHT_ALLOWED
-                    and not meta.get("swing", False)):
+                    and not sym_crypto and not meta.get("swing", False)):
                 decision = "CLOSE_EOD"
             else:
                 decision = monitor_position(symbol, position, last_bar, atr_value or 0.0, meta)
@@ -558,7 +567,7 @@ def run_iteration() -> dict[str, Any]:
                                 print(f"[intraday_monitor] accuracy update failed: {exc}",
                                       file=sys.stderr)
                         # Clear per-symbol meta now that we're flat
-                        state.get("positions_meta", {}).pop(symbol.upper(), None)
+                        state.get("positions_meta", {}).pop(sym_key, None)
                     except Exception as exc:  # noqa: BLE001
                         action_taken = f"CLOSE_FAILED:{exc}"
 

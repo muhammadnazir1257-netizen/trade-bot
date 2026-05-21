@@ -41,6 +41,24 @@ def _log(message: str) -> None:
     print(f"[trade] {message}", file=sys.stderr)
 
 
+def is_crypto(symbol: str) -> bool:
+    """Crypto symbols are pair-formatted (e.g. ``BTC/USD``)."""
+    return "/" in (symbol or "")
+
+
+def _norm(symbol: str) -> str:
+    """Normalize a symbol for matching positions: Alpaca returns crypto
+    positions as ``BTCUSD`` but accepts orders as ``BTC/USD``."""
+    return (symbol or "").upper().replace("/", "")
+
+
+def is_market_open_for(symbol: str) -> bool:
+    """Crypto trades 24/7; equities follow the exchange clock."""
+    if is_crypto(symbol):
+        return True
+    return bool(get_market_status().get("is_open", False))
+
+
 def _headers() -> dict[str, str]:
     """Build auth headers from environment variables."""
     key = os.environ.get("APCA_API_KEY_ID")
@@ -201,13 +219,13 @@ def validate_order(
     symbol_cap_pct = entries.get(symbol, {}).get("max_allocation_pct", max_single_pct)
     effective_cap_pct = min(max_single_pct, symbol_cap_pct)
 
-    # Market must be open
-    status = get_market_status()
-    if not status["is_open"]:
+    # Market must be open (crypto is always open)
+    if not is_market_open_for(symbol):
+        status = get_market_status()
         return False, "Market is closed; no orders permitted (next open %s)." % status.get("next_open", "?")
 
     notional = qty * current_price
-    held = next((p for p in current_positions if p.get("symbol", "").upper() == symbol), None)
+    held = next((p for p in current_positions if _norm(p.get("symbol", "")) == _norm(symbol)), None)
     # Alpaca reports short positions with negative qty / market_value.
     held_qty = float(held["qty"]) if held else 0.0          # signed: + long, - short
     held_mv = float(held["market_value"]) if held else 0.0  # signed
@@ -273,6 +291,8 @@ def validate_order(
         )
 
     # Opening / adding a short (held_qty <= 0)
+    if is_crypto(symbol):
+        return False, f"Cannot short {symbol}: Alpaca does not support crypto shorting."
     if not _shorting_cfg("SHORTING_ENABLED", True):
         return False, f"Shorting disabled by config; cannot open short {symbol}."
     projected_short_mv = held_abs_mv + notional   # held_abs_mv is the existing short's |mv|
@@ -325,13 +345,24 @@ def place_order(symbol: str, qty: float, side: str, limit_price: float) -> dict[
         raise ValueError(
             "limit_price is required — market orders are forbidden by policy."
         )
+    crypto = is_crypto(symbol)
+    # Crypto requires gtc/ioc (not "day") and allows fractional qty; equities
+    # use "day" and (here) whole shares.
+    tif = _shorting_cfg("CRYPTO_TIME_IN_FORCE", "gtc") if crypto else "day"
+    if crypto and _shorting_cfg("ALLOW_FRACTIONAL", True):
+        qty_str = f"{float(qty):.8f}".rstrip("0").rstrip(".")
+    else:
+        qty_str = str(int(qty)) if float(qty).is_integer() else str(qty)
+    # Crypto limit prices can need more precision than 2 dp for low-priced coins
+    price_str = (f"{float(limit_price):.2f}" if float(limit_price) >= 1 or not crypto
+                 else f"{float(limit_price):.6f}")
     body = {
         "symbol": symbol.upper(),
-        "qty": str(qty),
+        "qty": qty_str,
         "side": (side or "").lower(),
         "type": "limit",
-        "time_in_force": "day",
-        "limit_price": str(round(float(limit_price), 2)),
+        "time_in_force": tif,
+        "limit_price": price_str,
     }
     order = _request("POST", "/v2/orders", body=body)
     return {

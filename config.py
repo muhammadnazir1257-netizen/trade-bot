@@ -39,6 +39,27 @@ CORRELATION_LOOKBACK_DAYS = 60       # Daily-return window for the correlation m
 CORRELATION_THRESHOLD = 0.70         # |corr| >= this groups symbols into one cluster
 MAX_CLUSTER_EXPOSURE_PCT = 0.10      # Max combined exposure (% equity) to one correlated cluster
 
+# --- Self-learning (adaptive strategy selection) ---------------------------
+# The accuracy tracker records WIN/LOSS per strategy on every close. These
+# knobs turn that history into automatic promotion/benching of strategies.
+SELF_LEARNING_ENABLED = True
+MIN_TRADES_TO_JUDGE = 10             # Need >= N closed trades before judging a strategy
+AUTO_BENCH_WINRATE = 0.40           # Bench (zero-weight) a strategy below this win rate
+AUTO_BENCH_PROFIT_FACTOR = 0.9      # ...or below this profit factor
+EDGE_WEIGHT_MAX = 2.0               # Max weight multiplier for a proven-edge strategy
+APPLY_OPTIMIZED_PARAMS = True       # Load models/optimized_params.json into strategies at runtime
+
+# --- Multi-universe / crypto ----------------------------------------------
+CRYPTO_ENABLED = True
+CRYPTO_DATA_URL = "https://data.alpaca.markets"   # v1beta3/crypto/us/bars
+CRYPTO_TIME_IN_FORCE = "gtc"        # crypto does not support "day"
+ALLOW_FRACTIONAL = True             # fractional qty for crypto (and notional equities)
+
+# --- Out-of-sample validation ---------------------------------------------
+OOS_SPLIT_FRACTION = 0.70           # First 70% of bars = in-sample, last 30% = out-of-sample
+EDGE_MIN_WINRATE = 0.55             # "Has edge" gate for the discovery report
+EDGE_MIN_PROFIT_FACTOR = 1.30
+
 # --- Intraday loop ---------------------------------------------------------
 POLL_INTERVAL_SECONDS = 60           # Long-running loop sleep between iterations
 ORB_MINUTES = 30                     # Opening Range duration (9:30–10:00 ET)

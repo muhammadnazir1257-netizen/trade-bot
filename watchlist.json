@@ -1,10 +1,20 @@
 {
   "watchlist": [
-    { "symbol": "SPY", "description": "S&P 500 ETF — baseline market exposure", "max_allocation_pct": 15 },
-    { "symbol": "QQQ", "description": "Nasdaq ETF — tech sector exposure", "max_allocation_pct": 10 },
-    { "symbol": "NVDA", "description": "GPU/AI infrastructure — high conviction", "max_allocation_pct": 8 },
-    { "symbol": "AAPL", "description": "Large cap tech — stability anchor", "max_allocation_pct": 8 },
-    { "symbol": "MSFT", "description": "Cloud/enterprise — AI infrastructure play", "max_allocation_pct": 8 }
+    { "symbol": "SPY",  "asset_class": "us_equity", "universe": "largecap", "description": "S&P 500 ETF — baseline market exposure", "max_allocation_pct": 15 },
+    { "symbol": "QQQ",  "asset_class": "us_equity", "universe": "largecap", "description": "Nasdaq ETF — tech sector exposure", "max_allocation_pct": 10 },
+    { "symbol": "NVDA", "asset_class": "us_equity", "universe": "largecap", "description": "GPU/AI infrastructure — high conviction", "max_allocation_pct": 8 },
+    { "symbol": "AAPL", "asset_class": "us_equity", "universe": "largecap", "description": "Large cap tech — stability anchor", "max_allocation_pct": 8 },
+    { "symbol": "MSFT", "asset_class": "us_equity", "universe": "largecap", "description": "Cloud/enterprise — AI infrastructure play", "max_allocation_pct": 8 },
+
+    { "symbol": "IWM",  "asset_class": "us_equity", "universe": "smallcap", "description": "Russell 2000 ETF — small-cap broad exposure", "max_allocation_pct": 6 },
+    { "symbol": "IJR",  "asset_class": "us_equity", "universe": "smallcap", "description": "S&P SmallCap 600 ETF", "max_allocation_pct": 6 },
+    { "symbol": "SOFI", "asset_class": "us_equity", "universe": "smallcap", "description": "Fintech — liquid small/mid cap, higher volatility", "max_allocation_pct": 4 },
+    { "symbol": "RIOT", "asset_class": "us_equity", "universe": "smallcap", "description": "Crypto miner — high-beta small cap", "max_allocation_pct": 4 },
+    { "symbol": "MARA", "asset_class": "us_equity", "universe": "smallcap", "description": "Crypto miner — high-beta small cap", "max_allocation_pct": 4 },
+
+    { "symbol": "BTC/USD", "asset_class": "crypto", "universe": "crypto", "description": "Bitcoin — 24/7, less efficient than equities", "max_allocation_pct": 6 },
+    { "symbol": "ETH/USD", "asset_class": "crypto", "universe": "crypto", "description": "Ethereum — 24/7", "max_allocation_pct": 5 },
+    { "symbol": "LTC/USD", "asset_class": "crypto", "universe": "crypto", "description": "Litecoin — 24/7, smaller cap crypto", "max_allocation_pct": 3 }
   ],
   "cash_reserve_pct": 20,
   "stop_loss_pct": 8,

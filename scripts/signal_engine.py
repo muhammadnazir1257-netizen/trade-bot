@@ -207,14 +207,18 @@ def calculate_position_size(signal: dict[str, Any], account: dict,
     if target_notional > max_notional_cash:
         target_notional = max_notional_cash
 
-    qty = math.floor(target_notional / price)
+    crypto = "/" in (symbol or "")
+    if crypto and getattr(config, "ALLOW_FRACTIONAL", True):
+        qty = round(target_notional / price, 6)          # fractional units
+    else:
+        qty = math.floor(target_notional / price)        # whole shares
     notional = qty * price
     return {
-        "qty": int(qty),
+        "qty": float(qty) if crypto else int(qty),
         "notional": float(notional),
         "pct_of_equity": float(notional / equity) if equity else 0.0,
         "reason": (f"size {pct*100:.2f}% of equity (conf {confidence:.2f}, regime {regime}) "
-                   f"→ {qty} shares × ${price:.2f} = ${notional:,.2f}"),
+                   f"→ {qty} units × ${price:.2f} = ${notional:,.2f}"),
     }
 
 
@@ -257,16 +261,84 @@ def update_accuracy_tracker(symbol: str, strategy: str, signal: str,
 
 
 def _accuracy_multiplier(record: dict) -> float:
-    """Return a weight multiplier in [0.5, 1.5] based on this strategy's
-    historical win rate, falling back to 1.0 when too few trades exist."""
+    """Self-learning weight multiplier from realised performance.
+
+    - Below MIN_TRADES_TO_JUDGE closed trades → neutral (1.0).
+    - Win rate below AUTO_BENCH_WINRATE or profit factor below
+      AUTO_BENCH_PROFIT_FACTOR → **benched** (0.0): the strategy stops
+      contributing to consensus until it recovers.
+    - Otherwise scaled up toward EDGE_WEIGHT_MAX in proportion to its edge
+      (win rate above 50% and profit factor above 1.0).
+    """
+    if not getattr(config, "SELF_LEARNING_ENABLED", True):
+        return 1.0
     wins = int(record.get("wins", 0))
     losses = int(record.get("losses", 0))
     total = wins + losses
-    if total < config.ACCURACY_MIN_TRADES:
+    min_trades = getattr(config, "MIN_TRADES_TO_JUDGE", config.ACCURACY_MIN_TRADES)
+    if total < min_trades:
         return 1.0
     win_rate = wins / total
-    # 0.5 win rate → 1.0; 0.7 → ~1.4; 0.3 → ~0.6 (linear scale, clamped)
-    return float(max(0.5, min(1.5, 0.5 + win_rate)))
+    pf = _profit_factor(record.get("trades", []))
+
+    if win_rate < getattr(config, "AUTO_BENCH_WINRATE", 0.40) or \
+       pf < getattr(config, "AUTO_BENCH_PROFIT_FACTOR", 0.9):
+        return 0.0  # benched — proven underperformer
+
+    edge = max(0.0, win_rate - 0.5) * 2.0          # 0..1 over 50%..100%
+    pf_bonus = max(0.0, pf - 1.0) * 0.5
+    mult = 1.0 + edge + pf_bonus
+    return float(max(0.0, min(getattr(config, "EDGE_WEIGHT_MAX", 2.0), mult)))
+
+
+def _profit_factor(trades: list[dict]) -> float:
+    """Gross profit / gross loss from a strategy's recorded trade pnl_pct."""
+    gains = sum(float(t.get("pnl_pct", 0.0)) for t in trades if float(t.get("pnl_pct", 0.0)) > 0)
+    losses = -sum(float(t.get("pnl_pct", 0.0)) for t in trades if float(t.get("pnl_pct", 0.0)) < 0)
+    if losses <= 0:
+        return 2.0 if gains > 0 else 1.0
+    return gains / losses
+
+
+def apply_optimized_params() -> dict:
+    """Load models/optimized_params.json and push the best tuned params onto
+    each strategy module (self-tuning). Picks, per strategy, the parameter set
+    with the highest out-of-sample Sharpe across symbols. Returns what it set.
+    """
+    if not getattr(config, "APPLY_OPTIMIZED_PARAMS", True):
+        return {}
+    path = os.path.join(_ROOT, config.OPTIMIZED_PARAMS_PATH)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            opt = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    applied: dict[str, dict] = {}
+    name_to_mod = {getattr(m, "NAME", ""): m for m in STRATEGIES}
+    for strat, by_symbol in opt.items():
+        mod = name_to_mod.get(strat)
+        if not mod or not isinstance(by_symbol, dict):
+            continue
+        best_params, best_sharpe = None, float("-inf")
+        for _sym, entry in by_symbol.items():
+            best = (entry or {}).get("best") or {}
+            sharpe = best.get("sharpe_annualized")
+            params = best.get("params")
+            if params and sharpe is not None and sharpe > best_sharpe:
+                best_sharpe, best_params = sharpe, params
+        if best_params:
+            for k, v in best_params.items():
+                if hasattr(mod, k):
+                    setattr(mod, k, v)
+            applied[strat] = best_params
+    return applied
+
+
+# Apply tuned params at import so every run uses the latest optimization.
+try:
+    apply_optimized_params()
+except Exception as _exc:  # noqa: BLE001
+    print(f"[signal_engine] apply_optimized_params skipped: {_exc}", file=sys.stderr)
 
 
 def _load_accuracy_tracker() -> dict[str, Any]:
