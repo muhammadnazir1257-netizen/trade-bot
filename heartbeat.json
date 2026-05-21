@@ -1,7 +1,9 @@
 {
-  "last_run": "2026-05-20T20:15:42+00:00",
-  "last_routine": "End of Day",
-  "status": "ok",
+  "last_run": "2026-05-21T13:47:00+00:00",
+  "last_routine": "Morning Research",
+  "status": "error",
   "review_required": false,
-  "flags": []
+  "flags": [
+    "API_BLOCKED: All Alpaca API calls returned HTTP 403 (Host not in allowlist). Portfolio status and market data are estimated from 2026-05-20 carry-forward. Trader agent must verify live data access before placing any orders."
+  ]
 }
