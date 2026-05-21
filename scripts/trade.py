@@ -25,6 +25,11 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
+# Put project root on sys.path so `import config` works when run standalone.
+_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
+
 load_dotenv()
 
 TRADING_BASE = os.environ.get("APCA_BASE_URL", "https://paper-api.alpaca.markets").rstrip("/")
@@ -203,43 +208,101 @@ def validate_order(
 
     notional = qty * current_price
     held = next((p for p in current_positions if p.get("symbol", "").upper() == symbol), None)
-    held_qty = float(held["qty"]) if held else 0.0
-    held_mv = float(held["market_value"]) if held else 0.0
+    # Alpaca reports short positions with negative qty / market_value.
+    held_qty = float(held["qty"]) if held else 0.0          # signed: + long, - short
+    held_mv = float(held["market_value"]) if held else 0.0  # signed
+    held_abs_mv = abs(held_mv)
 
-    if side == "sell":
-        if held is None or held_qty <= 0:
-            return False, f"Cannot sell {symbol}: no open position."
-        if qty > held_qty:
-            return False, f"Cannot sell {qty} {symbol}: only {held_qty} held."
-        return True, (
-            f"OK: SELL {qty} {symbol} @ ~${current_price:.2f} "
-            f"(closing/trimming a held position)."
-        )
-
-    # side == "buy" — concentration + cash-reserve checks
-    projected_exposure = held_mv + notional
     cap_value = (effective_cap_pct / 100.0) * account_value
-    if projected_exposure > cap_value + 1e-6:
-        return False, (
-            f"Position cap breach: {symbol} would be ${projected_exposure:,.2f} "
-            f"({projected_exposure / account_value * 100:.2f}% of equity), "
-            f"cap is {effective_cap_pct}% (${cap_value:,.2f})."
+    max_gross = _shorting_cfg("MAX_GROSS_EXPOSURE_PCT", 1.5) * account_value
+    gross_now = sum(abs(float(p.get("market_value", 0.0))) for p in current_positions)
+    # Gross exposure if this order's symbol exposure is replaced by the projection
+    gross_excl_symbol = gross_now - held_abs_mv
+
+    if side == "buy":
+        if held_qty < 0:
+            # Buy-to-cover an existing short
+            if qty <= abs(held_qty) + 1e-9:
+                return True, (
+                    f"OK: BUY-to-cover {qty} {symbol} @ ~${current_price:.2f} "
+                    f"(reducing short of {abs(held_qty):g})."
+                )
+            return False, (
+                f"BUY {qty} exceeds short {abs(held_qty):g} {symbol}: would flip to long. "
+                f"Cover the short fully in one order, then open a long separately."
+            )
+        # Opening / adding a long
+        projected_long_mv = (held_mv if held_qty > 0 else 0.0) + notional
+        if projected_long_mv > cap_value + 1e-6:
+            return False, (
+                f"Position cap breach: long {symbol} would be ${projected_long_mv:,.2f} "
+                f"({projected_long_mv / account_value * 100:.2f}% of equity), "
+                f"cap {effective_cap_pct}% (${cap_value:,.2f})."
+            )
+        if gross_excl_symbol + projected_long_mv > max_gross + 1e-6:
+            return False, (
+                f"Gross-exposure breach: total |exposure| would be "
+                f"${gross_excl_symbol + projected_long_mv:,.2f} "
+                f"(> {_shorting_cfg('MAX_GROSS_EXPOSURE_PCT',1.5)*100:.0f}% cap ${max_gross:,.2f})."
+            )
+        cash = _get_account().get("cash", 0.0)
+        cash_after = cash - notional
+        min_cash = (cash_reserve_pct / 100.0) * account_value
+        if cash_after < min_cash - 1e-6:
+            return False, (
+                f"Cash-reserve breach: cash would fall to ${cash_after:,.2f}, "
+                f"below the {cash_reserve_pct}% reserve (${min_cash:,.2f})."
+            )
+        return True, (
+            f"OK: BUY {qty} {symbol} @ ~${current_price:.2f} "
+            f"(notional ${notional:,.2f}, {notional / account_value * 100:.2f}% of equity, "
+            f"within {effective_cap_pct}% cap; reserve + gross OK)."
         )
 
-    cash = _get_account().get("cash", 0.0)
-    cash_after = cash - notional
-    min_cash = (cash_reserve_pct / 100.0) * account_value
-    if cash_after < min_cash - 1e-6:
+    # side == "sell"
+    if held_qty > 0:
+        # Sell-to-close / trim an existing long
+        if qty <= held_qty + 1e-9:
+            return True, (
+                f"OK: SELL {qty} {symbol} @ ~${current_price:.2f} "
+                f"(closing/trimming long of {held_qty:g})."
+            )
         return False, (
-            f"Cash-reserve breach: cash would fall to ${cash_after:,.2f}, "
-            f"below the {cash_reserve_pct}% reserve (${min_cash:,.2f})."
+            f"SELL {qty} exceeds long {held_qty:g} {symbol}: would flip to short. "
+            f"Close the long fully in one order, then open a short separately."
         )
 
+    # Opening / adding a short (held_qty <= 0)
+    if not _shorting_cfg("SHORTING_ENABLED", True):
+        return False, f"Shorting disabled by config; cannot open short {symbol}."
+    projected_short_mv = held_abs_mv + notional   # held_abs_mv is the existing short's |mv|
+    if projected_short_mv > cap_value + 1e-6:
+        return False, (
+            f"Position cap breach: short {symbol} would be ${projected_short_mv:,.2f} "
+            f"({projected_short_mv / account_value * 100:.2f}% of equity), "
+            f"cap {effective_cap_pct}% (${cap_value:,.2f})."
+        )
+    if gross_excl_symbol + projected_short_mv > max_gross + 1e-6:
+        return False, (
+            f"Gross-exposure breach: total |exposure| would be "
+            f"${gross_excl_symbol + projected_short_mv:,.2f} "
+            f"(> {_shorting_cfg('MAX_GROSS_EXPOSURE_PCT',1.5)*100:.0f}% cap ${max_gross:,.2f})."
+        )
     return True, (
-        f"OK: BUY {qty} {symbol} @ ~${current_price:.2f} "
+        f"OK: SHORT {qty} {symbol} @ ~${current_price:.2f} "
         f"(notional ${notional:,.2f}, {notional / account_value * 100:.2f}% of equity, "
-        f"within {effective_cap_pct}% cap; cash reserve preserved)."
+        f"within {effective_cap_pct}% cap; gross OK)."
     )
+
+
+def _shorting_cfg(name: str, default):
+    """Read a config value without a hard import dependency (keeps trade.py
+    runnable standalone if config.py is absent)."""
+    try:
+        import config  # type: ignore
+        return getattr(config, name, default)
+    except Exception:
+        return default
 
 
 def place_order(symbol: str, qty: float, side: str, limit_price: float) -> dict[str, Any]:

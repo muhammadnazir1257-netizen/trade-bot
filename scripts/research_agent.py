@@ -182,14 +182,20 @@ def backtest_strategy(strategy_module, symbol: str, lookback_days: int = 90) -> 
                 "strategy": getattr(strategy_module, "NAME", "?"),
                 "trades": 0, "win_rate": None, "profit_factor": None}
 
+    # Round-trip cost: slippage on both entry and exit, plus commission.
+    slippage = 2 * (config.SLIPPAGE_BPS / 10000.0)   # both sides, fractional
     pnl = []
     for t in trades:
         if t["side"] == "BUY":
             r = (t["exit_price"] - t["entry_price"]) / t["entry_price"]
         else:
             r = (t["entry_price"] - t["exit_price"]) / t["entry_price"]
-        t["return_pct"] = r
-        pnl.append(r)
+        # Commission per share, expressed as fraction of entry price (×2 sides)
+        commission_frac = (2 * config.COMMISSION_PER_SHARE / t["entry_price"]) if t["entry_price"] else 0.0
+        r_net = r - slippage - commission_frac
+        t["return_pct_gross"] = r
+        t["return_pct"] = r_net
+        pnl.append(r_net)
     pnl_arr = np.array(pnl)
     wins = pnl_arr[pnl_arr > 0]
     losses = pnl_arr[pnl_arr <= 0]
@@ -216,6 +222,8 @@ def backtest_strategy(strategy_module, symbol: str, lookback_days: int = 90) -> 
         "strategy": getattr(strategy_module, "NAME", "?"),
         "lookback_days_requested": lookback_days,
         "bars_used": len(bars),
+        "cost_model": {"slippage_bps_per_side": config.SLIPPAGE_BPS,
+                       "commission_per_share": config.COMMISSION_PER_SHARE},
         "trades": len(trades),
         "win_rate": win_rate,
         "avg_win_pct": avg_win,

@@ -101,10 +101,24 @@ def build_journal(date_str: str) -> str:
                 })
 
     pos_list = ", ".join(
-        f"{p['symbol']} {p['qty']:g} @ ${p['avg_entry_price']:.2f} "
-        f"({p['unrealized_plpc']*100:+.2f}%)"
+        f"{p['symbol']} {'SHORT' if p['qty'] < 0 else 'LONG'} {abs(p['qty']):g} "
+        f"@ ${p['avg_entry_price']:.2f} ({p['unrealized_plpc']*100:+.2f}%)"
         for p in positions
     ) or "none"
+
+    # Accuracy tracker summary (per-strategy win rates from the close-loop)
+    acc_lines = []
+    try:
+        acc_path = os.path.join(_ROOT, config.ACCURACY_TRACKER_PATH)
+        with open(acc_path, "r", encoding="utf-8") as fh:
+            acc = json.load(fh)
+        for strat, rec in sorted(acc.items()):
+            w, l = int(rec.get("wins", 0)), int(rec.get("losses", 0))
+            tot = w + l
+            wr = f"{w/tot:.0%}" if tot else "n/a"
+            acc_lines.append(f"- {strat}: {w}W/{l}L ({wr}), cum pnl {rec.get('pnl_sum',0):+.3f}")
+    except (OSError, ValueError):
+        pass
 
     lines = [
         f"# Trade Journal — {date_str}",
@@ -136,6 +150,9 @@ def build_journal(date_str: str) -> str:
         "## Signal Summary",
         f"- Composite signals across the day: BUY {composite_counts.get('BUY',0)}, "
         f"SELL {composite_counts.get('SELL',0)}, HOLD {composite_counts.get('HOLD',0)}",
+        "",
+        "## Strategy Accuracy (lifetime, from close-loop)",
+        *(acc_lines or ["- No closed trades recorded yet."]),
         "",
         "## End-of-Day Reflection",
         (f"Local intraday engine ran {len(rows)} iterations in the {regime_seen} regime. "

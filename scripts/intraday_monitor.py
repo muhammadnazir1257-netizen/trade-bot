@@ -89,6 +89,30 @@ def _phase() -> str:
     return "post_close"
 
 
+def _bars_fresh(bars: list) -> bool:
+    """True if the latest bar is newer than config.MAX_BAR_STALENESS_MINUTES.
+
+    Guards new entries against feed hiccups. Fails CLOSED (returns False) if a
+    timestamp can't be parsed, so we never open a position on unparseable data.
+    """
+    if not bars:
+        return False
+    t = bars[-1].get("t", "")
+    try:
+        if isinstance(t, str):
+            ts = datetime.fromisoformat(t.replace("Z", "+00:00"))
+        elif isinstance(t, (int, float)):
+            ts = datetime.fromtimestamp(t, tz=timezone.utc)
+        else:
+            return False
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        age_min = (datetime.now(timezone.utc) - ts).total_seconds() / 60.0
+        return age_min <= config.MAX_BAR_STALENESS_MINUTES
+    except (ValueError, TypeError):
+        return False
+
+
 # --- Filesystem ------------------------------------------------------------
 
 
@@ -299,33 +323,46 @@ def monitor_position(symbol: str, position: dict, current_bar: dict,
     # close is only a fallback. Bars can lag or be stale on the free feed, and
     # acting on a phantom price can fire a false stop on a winning position.
     current_price = float(position.get("current_price") or current_bar.get("c", 0))
-    qty = float(position.get("qty", 0))
-    if qty <= 0 or current_price <= 0:
+    qty = float(position.get("qty", 0))      # signed: + long, - short
+    if qty == 0 or current_price <= 0:
         return "HOLD"
     avg_entry = float(position.get("avg_entry_price", current_price))
-
-    hard_stop = float(meta.get("stop_loss") or avg_entry * (1 - config.STOP_LOSS_PCT))
+    is_long = qty > 0
     take_profit = float(meta.get("take_profit") or 0.0)
 
-    # Trailing stop — moves only in trade direction
-    peak = float(meta.get("peak_price") or current_price)
-    if current_price > peak:
-        peak = current_price
-    meta["peak_price"] = peak
-    if atr_value and atr_value > 0:
-        trail = peak - config.TRAILING_STOP_ATR_MULT * atr_value
-        meta["trailing_stop"] = max(float(meta.get("trailing_stop") or 0.0), trail)
+    if is_long:
+        hard_stop = float(meta.get("stop_loss") or avg_entry * (1 - config.STOP_LOSS_PCT))
+        # Trailing stop trails the peak upward; only ever moves up.
+        peak = max(float(meta.get("peak_price") or current_price), current_price)
+        meta["peak_price"] = peak
+        if atr_value and atr_value > 0:
+            trail = peak - config.TRAILING_STOP_ATR_MULT * atr_value
+            meta["trailing_stop"] = max(float(meta.get("trailing_stop") or 0.0), trail)
+        effective_stop = max(hard_stop, float(meta.get("trailing_stop") or 0.0))
+        if current_price <= effective_stop:
+            return "CLOSE_STOP"
+        if take_profit and current_price >= take_profit:
+            return "CLOSE_PROFIT"
+        favorable_move = (current_price - avg_entry) / avg_entry
+    else:
+        # Short: stop is ABOVE entry, take-profit BELOW, trailing stop trails
+        # the trough downward; only ever moves down.
+        hard_stop = float(meta.get("stop_loss") or avg_entry * (1 + config.STOP_LOSS_PCT))
+        trough = min(float(meta.get("trough_price") or current_price), current_price)
+        meta["trough_price"] = trough
+        if atr_value and atr_value > 0:
+            trail = trough + config.TRAILING_STOP_ATR_MULT * atr_value
+            prev = meta.get("trailing_stop")
+            meta["trailing_stop"] = trail if prev is None else min(float(prev), trail)
+        ts = meta.get("trailing_stop")
+        effective_stop = min(hard_stop, float(ts)) if ts is not None else hard_stop
+        if current_price >= effective_stop:
+            return "CLOSE_STOP"
+        if take_profit and current_price <= take_profit:
+            return "CLOSE_PROFIT"
+        favorable_move = (avg_entry - current_price) / avg_entry
 
-    # Stop hit?
-    effective_stop = max(hard_stop, float(meta.get("trailing_stop") or 0.0))
-    if current_price <= effective_stop:
-        return "CLOSE_STOP"
-
-    # Take-profit hit?
-    if take_profit and current_price >= take_profit:
-        return "CLOSE_PROFIT"
-
-    # Time stop — entered too long ago without favorable movement
+    # Time stop — entered too long ago without favorable movement (either side)
     entry_time = meta.get("entry_time")
     if entry_time:
         try:
@@ -333,10 +370,8 @@ def monitor_position(symbol: str, position: dict, current_bar: dict,
             if t0.tzinfo is None:
                 t0 = t0.replace(tzinfo=timezone.utc)
             held_minutes = (datetime.now(timezone.utc) - t0).total_seconds() / 60.0
-            if held_minutes >= config.TIME_STOP_MINUTES:
-                move_pct = (current_price - avg_entry) / avg_entry
-                if move_pct < config.TIME_STOP_MIN_MOVE_PCT:
-                    return "CLOSE_TIME"
+            if held_minutes >= config.TIME_STOP_MINUTES and favorable_move < config.TIME_STOP_MIN_MOVE_PCT:
+                return "CLOSE_TIME"
         except (ValueError, TypeError):
             pass
     return "HOLD"
@@ -388,9 +423,15 @@ def run_iteration() -> dict[str, Any]:
         _save_state(state)
         return entry
 
+    # Prefetch daily bars once for all watchlist + held symbols (reused for
+    # regime, per-symbol analysis, and the correlation-cluster check).
+    held_syms = [p["symbol"].upper() for p in positions_list]
+    daily_bars_by_symbol: dict[str, list] = {}
+    for sym in dict.fromkeys([s.upper() for s in symbols] + held_syms + ["SPY"]):
+        daily_bars_by_symbol[sym] = research.get_bars(sym, timeframe="1Day", limit=120)
+
     # Regime classification (once per iteration)
-    spy_daily = research.get_bars("SPY", timeframe="1Day", limit=120)
-    regime = market_regime.classify(spy_daily)
+    regime = market_regime.classify(daily_bars_by_symbol.get("SPY", []))
 
     signals_out: list[dict[str, Any]] = []
     placed_orders: list[dict[str, Any]] = []
@@ -398,9 +439,14 @@ def run_iteration() -> dict[str, Any]:
     for symbol in symbols:
         bars_1m = research.get_bars(symbol, timeframe="1Min", limit=200)
         bars_5m = research.get_bars(symbol, timeframe="5Min", limit=200)
-        bars_1d = research.get_bars(symbol, timeframe="1Day", limit=120)
+        bars_1d = daily_bars_by_symbol.get(symbol.upper()) or research.get_bars(symbol, timeframe="1Day", limit=120)
         if not bars_1m and not bars_5m:
             continue
+
+        # Data-freshness guard: skip NEW entries if the latest intraday bar is
+        # stale (defense against feed hiccups). Position management still runs
+        # off the broker mark, so existing stops are unaffected.
+        data_fresh = _bars_fresh(bars_1m or bars_5m)
 
         # ATR for sizing & trailing stops
         _, h5, l5, c5, _ = ind.extract_ohlcv(bars_5m or [])
@@ -417,45 +463,58 @@ def run_iteration() -> dict[str, Any]:
         action_taken = "NONE"
         order_info: dict[str, Any] | None = None
 
-        # Trade only in active mode and below the daily cap
+        # ENTRY — long on BUY, short on SELL. Only when flat in this symbol,
+        # in active phase, under the daily cap, and on fresh data.
         if (phase == "active"
                 and composite["signal"] in ("BUY", "SELL")
                 and state.get("trades_today", 0) < config.MAX_DAILY_TRADES
                 and symbol.upper() not in positions_by_sym):
-            sizing = signal_engine.calculate_position_size(
-                composite, account, regime["regime"], atr_value, symbol, watchlist)
-            qty = sizing["qty"]
-            entry_price = composite.get("entry_price") or float(c5[-1]) if len(c5) else 0.0
-            if qty > 0 and entry_price > 0 and composite["signal"] == "BUY":
-                limit_price = round(float(entry_price), 2)
-                ok, why = trade.validate_order(
-                    symbol, qty, "buy", limit_price,
-                    float(account.get("equity", 0.0)),
-                    [{"symbol": p["symbol"], "qty": float(p["qty"]),
-                      "market_value": float(p["market_value"])} for p in positions_list],
-                    watchlist,
-                )
-                if ok:
-                    try:
-                        order = trade.place_order(symbol, qty, "buy", limit_price)
-                        order_info = {"order": order, "sizing": sizing}
-                        action_taken = "ORDER_PLACED"
-                        placed_orders.append(order)
-                        state["trades_today"] = int(state.get("trades_today", 0)) + 1
-                        # Track per-symbol state
-                        state.setdefault("positions_meta", {})[symbol.upper()] = {
-                            "entry_time": datetime.now(timezone.utc).isoformat(),
-                            "stop_loss": composite.get("stop_loss"),
-                            "take_profit": composite.get("take_profit"),
-                            "peak_price": entry_price,
-                            "trailing_stop": None,
-                        }
-                    except Exception as exc:  # noqa: BLE001
-                        action_taken = f"ORDER_FAILED:{exc}"
-                else:
-                    action_taken = f"REJECTED:{why}"
+            if not data_fresh:
+                action_taken = "SKIPPED:stale_data"
+            else:
+                side = "buy" if composite["signal"] == "BUY" else "sell"
+                sizing = signal_engine.calculate_position_size(
+                    composite, account, regime["regime"], atr_value, symbol, watchlist)
+                qty = sizing["qty"]
+                entry_price = composite.get("entry_price") or (float(c5[-1]) if len(c5) else 0.0)
+                if qty > 0 and entry_price > 0:
+                    limit_price = round(float(entry_price), 2)
+                    pos_snapshot = [{"symbol": p["symbol"], "qty": float(p["qty"]),
+                                     "market_value": float(p["market_value"])} for p in positions_list]
+                    # Correlation-cluster gate (fail-open if data missing)
+                    corr_ok, corr_reason = signal_engine.check_correlation_exposure(
+                        symbol, sizing["notional"], pos_snapshot,
+                        float(account.get("equity", 0.0)), daily_bars_by_symbol)
+                    if not corr_ok:
+                        action_taken = f"REJECTED:{corr_reason}"
+                    else:
+                        ok, why = trade.validate_order(
+                            symbol, qty, side, limit_price,
+                            float(account.get("equity", 0.0)), pos_snapshot, watchlist)
+                        if ok:
+                            try:
+                                order = trade.place_order(symbol, qty, side, limit_price)
+                                order_info = {"order": order, "sizing": sizing}
+                                action_taken = "SHORT_OPENED" if side == "sell" else "ORDER_PLACED"
+                                placed_orders.append(order)
+                                state["trades_today"] = int(state.get("trades_today", 0)) + 1
+                                state.setdefault("positions_meta", {})[symbol.upper()] = {
+                                    "direction": "long" if side == "buy" else "short",
+                                    "entry_time": datetime.now(timezone.utc).isoformat(),
+                                    "entry_price": entry_price,
+                                    "stop_loss": composite.get("stop_loss"),
+                                    "take_profit": composite.get("take_profit"),
+                                    "peak_price": entry_price,
+                                    "trough_price": entry_price,
+                                    "trailing_stop": None,
+                                    "opening_strategies": composite.get("opening_strategies", []),
+                                }
+                            except Exception as exc:  # noqa: BLE001
+                                action_taken = f"ORDER_FAILED:{exc}"
+                        else:
+                            action_taken = f"REJECTED:{why}"
 
-        # Monitor existing positions
+        # MANAGE existing position — long or short
         if symbol.upper() in positions_by_sym:
             position = positions_by_sym[symbol.upper()]
             meta = state.setdefault("positions_meta", {}).setdefault(symbol.upper(), {})
@@ -463,14 +522,37 @@ def run_iteration() -> dict[str, Any]:
             decision = monitor_position(symbol, position, last_bar, atr_value or 0.0, meta)
             if decision in ("CLOSE_STOP", "CLOSE_PROFIT", "CLOSE_TIME"):
                 current_price = float(position.get("current_price") or last_bar.get("c", 0))
-                qty_held = float(position.get("qty", 0))
-                if qty_held > 0 and current_price > 0:
-                    limit_price = round(current_price * 0.998, 2)  # sell just below market
+                qty_held = float(position.get("qty", 0))     # signed
+                if qty_held != 0 and current_price > 0:
+                    if qty_held > 0:   # close a long → SELL
+                        close_side, close_qty = "sell", qty_held
+                        limit_price = round(current_price * 0.998, 2)
+                    else:              # cover a short → BUY
+                        close_side, close_qty = "buy", abs(qty_held)
+                        limit_price = round(current_price * 1.002, 2)
                     try:
-                        order = trade.place_order(symbol, qty_held, "sell", limit_price)
+                        order = trade.place_order(symbol, close_qty, close_side, limit_price)
                         action_taken = decision
                         order_info = {"order": order, "exit_reason": decision}
                         placed_orders.append(order)
+                        # Accuracy close-loop: realised P&L → credit/charge each
+                        # strategy that voted to open this position.
+                        avg_entry = float(position.get("avg_entry_price", current_price))
+                        if qty_held > 0:
+                            pnl_pct = (current_price - avg_entry) / avg_entry if avg_entry else 0.0
+                        else:
+                            pnl_pct = (avg_entry - current_price) / avg_entry if avg_entry else 0.0
+                        outcome = "WIN" if pnl_pct > 0 else "LOSS"
+                        direction = "BUY" if qty_held > 0 else "SELL"
+                        for strat in meta.get("opening_strategies", []):
+                            try:
+                                signal_engine.update_accuracy_tracker(
+                                    symbol, strat, direction, outcome, pnl_pct)
+                            except Exception as exc:  # noqa: BLE001
+                                print(f"[intraday_monitor] accuracy update failed: {exc}",
+                                      file=sys.stderr)
+                        # Clear per-symbol meta now that we're flat
+                        state.get("positions_meta", {}).pop(symbol.upper(), None)
                     except Exception as exc:  # noqa: BLE001
                         action_taken = f"CLOSE_FAILED:{exc}"
 

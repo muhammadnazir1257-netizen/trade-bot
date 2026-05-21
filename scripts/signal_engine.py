@@ -136,8 +136,9 @@ def aggregate_signals(signals: list[dict[str, Any]], regime: str,
         else:
             entry_price, stop, tp = None, None, None
         reason = f"BUY consensus {buy_share:.2%}; pattern_boost {pattern_boost:+.3f}"
+        owners = [c["strategy"] for c in components if c["signal"] == "BUY" and c["weight"] > 0]
         return _compose(composite_signal, composite_conf, reason, components,
-                        entry_price, stop, tp)
+                        entry_price, stop, tp, owners)
 
     if sell_share >= max(config.CONSENSUS_THRESHOLD, buy_share):
         composite_signal = "SELL"
@@ -149,12 +150,13 @@ def aggregate_signals(signals: list[dict[str, Any]], regime: str,
         else:
             entry_price, stop, tp = None, None, None
         reason = f"SELL consensus {sell_share:.2%}; pattern_boost {pattern_boost:+.3f}"
+        owners = [c["strategy"] for c in components if c["signal"] == "SELL" and c["weight"] > 0]
         return _compose(composite_signal, composite_conf, reason, components,
-                        entry_price, stop, tp)
+                        entry_price, stop, tp, owners)
 
     return _compose("HOLD", 0.0,
                     f"no consensus (BUY {buy_share:.2%}, SELL {sell_share:.2%})",
-                    components, None, None, None)
+                    components, None, None, None, [])
 
 
 def calculate_position_size(signal: dict[str, Any], account: dict,
@@ -277,7 +279,8 @@ def _load_accuracy_tracker() -> dict[str, Any]:
 
 
 def _compose(signal: str, confidence: float, reason: str,
-             components: list[dict], entry_price, stop, tp) -> dict[str, Any]:
+             components: list[dict], entry_price, stop, tp,
+             opening_strategies: list[str] | None = None) -> dict[str, Any]:
     return {
         "signal": signal,
         "confidence": float(confidence),
@@ -286,12 +289,83 @@ def _compose(signal: str, confidence: float, reason: str,
         "entry_price": entry_price,
         "stop_loss": stop,
         "take_profit": tp,
+        "opening_strategies": opening_strategies or [],
         "components": components,
     }
 
 
 def _hold(reason: str) -> dict[str, Any]:
-    return _compose("HOLD", 0.0, reason, [], None, None, None)
+    return _compose("HOLD", 0.0, reason, [], None, None, None, [])
+
+
+def check_correlation_exposure(symbol: str, candidate_notional: float,
+                               positions: list[dict], equity: float,
+                               daily_bars_by_symbol: dict[str, list]) -> tuple[bool, str]:
+    """Block an entry that would over-concentrate a correlated cluster.
+
+    Groups the candidate with any held symbol whose daily-return correlation
+    is >= ``config.CORRELATION_THRESHOLD``. If the candidate's notional plus the
+    cluster's existing |exposure| exceeds ``config.MAX_CLUSTER_EXPOSURE_PCT`` of
+    equity, the trade is blocked.
+
+    Fails OPEN: if correlations can't be computed (missing data), returns OK.
+    """
+    if equity <= 0 or not positions:
+        return True, "no existing exposure to cluster"
+    cand_returns = _returns(daily_bars_by_symbol.get(symbol.upper(), []))
+    if cand_returns is None:
+        return True, "candidate return history unavailable (fail-open)"
+
+    cluster_exposure = 0.0
+    cluster_members = []
+    for p in positions:
+        psym = p["symbol"].upper()
+        if psym == symbol.upper():
+            cluster_exposure += abs(float(p.get("market_value", 0.0)))
+            cluster_members.append(psym)
+            continue
+        p_returns = _returns(daily_bars_by_symbol.get(psym, []))
+        if p_returns is None:
+            continue
+        corr = _correlation(cand_returns, p_returns)
+        if corr is not None and abs(corr) >= config.CORRELATION_THRESHOLD:
+            cluster_exposure += abs(float(p.get("market_value", 0.0)))
+            cluster_members.append(f"{psym}(corr={corr:.2f})")
+
+    cluster_cap = config.MAX_CLUSTER_EXPOSURE_PCT * equity
+    projected = cluster_exposure + candidate_notional
+    if projected > cluster_cap + 1e-6:
+        return False, (
+            f"correlation-cluster cap: {symbol} + [{', '.join(cluster_members) or 'none'}] "
+            f"would be ${projected:,.2f} ({projected/equity*100:.1f}% of equity), "
+            f"cap {config.MAX_CLUSTER_EXPOSURE_PCT*100:.0f}% (${cluster_cap:,.2f})"
+        )
+    return True, (
+        f"cluster exposure ${projected:,.2f} within "
+        f"{config.MAX_CLUSTER_EXPOSURE_PCT*100:.0f}% cap"
+    )
+
+
+def _returns(bars: list[dict]):
+    """Daily simple returns from a bars list, capped to the config lookback."""
+    closes = [float(b["c"]) for b in bars if "c" in b]
+    if len(closes) < 5:
+        return None
+    closes = closes[-config.CORRELATION_LOOKBACK_DAYS:]
+    arr = np.array(closes, dtype=float)
+    rets = np.diff(arr) / arr[:-1]
+    return rets
+
+
+def _correlation(a, b):
+    """Pearson correlation over the overlapping tail of two return series."""
+    n = min(len(a), len(b))
+    if n < 5:
+        return None
+    a2, b2 = a[-n:], b[-n:]
+    if np.std(a2) == 0 or np.std(b2) == 0:
+        return None
+    return float(np.corrcoef(a2, b2)[0, 1])
 
 
 # --- CLI entry point for quick dry-run inspection --------------------------

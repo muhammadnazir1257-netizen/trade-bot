@@ -23,6 +23,22 @@ TRAILING_STOP_ATR_MULT = 0.5         # Trail by 0.5 × ATR
 TIME_STOP_MINUTES = 90               # Exit if not moving in our direction after 90 min
 TIME_STOP_MIN_MOVE_PCT = 0.005       # "Not moving" = less than 0.5% favorable
 
+# --- Long / short ----------------------------------------------------------
+SHORTING_ENABLED = True              # Allow SELL composites to open short positions
+MAX_GROSS_EXPOSURE_PCT = 1.5         # Cap on gross |long|+|short| exposure (150% of equity)
+
+# --- Data quality ----------------------------------------------------------
+MAX_BAR_STALENESS_MINUTES = 20       # Skip new entries if latest bar older than this (during market hours)
+
+# --- Backtest realism ------------------------------------------------------
+COMMISSION_PER_SHARE = 0.0           # Alpaca equities are commission-free
+SLIPPAGE_BPS = 5.0                   # Modeled slippage per side, in basis points (0.05%)
+
+# --- Correlation-aware exposure -------------------------------------------
+CORRELATION_LOOKBACK_DAYS = 60       # Daily-return window for the correlation matrix
+CORRELATION_THRESHOLD = 0.70         # |corr| >= this groups symbols into one cluster
+MAX_CLUSTER_EXPOSURE_PCT = 0.10      # Max combined exposure (% equity) to one correlated cluster
+
 # --- Intraday loop ---------------------------------------------------------
 POLL_INTERVAL_SECONDS = 60           # Long-running loop sleep between iterations
 ORB_MINUTES = 30                     # Opening Range duration (9:30–10:00 ET)
