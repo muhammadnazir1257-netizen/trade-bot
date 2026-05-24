@@ -8,14 +8,17 @@ position sizing and risk.
 from __future__ import annotations
 
 # --- Signal aggregation ----------------------------------------------------
-CONSENSUS_THRESHOLD = 0.60           # Min weighted vote (BUY or SELL share) to emit a signal
+# Lower consensus = more trades; higher pattern boost = patterns weigh more.
+# Max-aggression baseline (paper-only): wider participation, faster execution.
+CONSENSUS_THRESHOLD = 0.55           # was 0.60 — fire on weaker but still real majorities
 PATTERN_BOOST_MAX = 0.15             # Cap on how much chart patterns can shift composite confidence
 
-# --- Position sizing (Kelly-ish) -------------------------------------------
-BASE_POSITION_PCT = 0.02             # 2% of portfolio per trade (default)
-MAX_POSITION_PCT = 0.04              # 4% on high-confidence trades (confidence >= 0.80 + trending regime)
-MIN_POSITION_PCT = 0.01              # 1% in HIGH_VOLATILITY regime
-CASH_RESERVE_PCT = 0.20              # Always keep 20% cash
+# --- Position sizing (Kelly-ish, max-aggression) ---------------------------
+# Stops, kill switch, and cash reserve are UNCHANGED — only the offense moves.
+BASE_POSITION_PCT = 0.04             # was 0.02 — 4% baseline per trade
+MAX_POSITION_PCT = 0.08              # was 0.04 — 8% for high-confidence in trending regime
+MIN_POSITION_PCT = 0.015             # was 0.01 — slightly larger floor in HIGH_VOLATILITY
+CASH_RESERVE_PCT = 0.20              # SACRED — always keep 20% cash
 
 # --- Risk management -------------------------------------------------------
 STOP_LOSS_PCT = 0.008                # 0.8% hard stop (strategy can override)
@@ -43,11 +46,12 @@ MAX_CLUSTER_EXPOSURE_PCT = 0.10      # Max combined exposure (% equity) to one c
 # The accuracy tracker records WIN/LOSS per strategy on every close. These
 # knobs turn that history into automatic promotion/benching of strategies.
 SELF_LEARNING_ENABLED = True
-MIN_TRADES_TO_JUDGE = 10             # Need >= N closed trades before judging a strategy
-AUTO_BENCH_WINRATE = 0.40           # Bench (zero-weight) a strategy below this win rate
-AUTO_BENCH_PROFIT_FACTOR = 0.9      # ...or below this profit factor
-EDGE_WEIGHT_MAX = 2.0               # Max weight multiplier for a proven-edge strategy
-APPLY_OPTIMIZED_PARAMS = True       # Load models/optimized_params.json into strategies at runtime
+MIN_TRADES_TO_JUDGE = 8              # was 10 — judge sooner so winners get amplified faster
+AUTO_BENCH_WINRATE = 0.45            # was 0.40 — kill underperforming strategies more aggressively
+AUTO_BENCH_PROFIT_FACTOR = 1.0       # was 0.9 — require PF >= 1.0 to keep voting
+EDGE_WEIGHT_MAX = 3.0                # was 2.0 — concentrate harder on proven winners
+APPLY_OPTIMIZED_PARAMS = True        # Load models/optimized_params.json into strategies at runtime
+MAX_DAILY_TRADES_AGGRESSIVE = 20     # informational — pair with MAX_DAILY_TRADES below if cranking
 
 # --- Multi-universe / crypto ----------------------------------------------
 CRYPTO_ENABLED = True
@@ -77,7 +81,7 @@ EXTERNAL_CACHE_DIR = "models/external_cache"
 POLL_INTERVAL_SECONDS = 60           # Long-running loop sleep between iterations
 ORB_MINUTES = 30                     # Opening Range duration (9:30–10:00 ET)
 CLOSE_POSITIONS_BEFORE = "15:30"     # ET — force-close swing-disabled positions after this
-MAX_DAILY_TRADES = 10                # Per-day cap to prevent overtrading
+MAX_DAILY_TRADES = 20                # was 10 — max-aggression cap (paper-only baseline)
 MAX_DAILY_LOSS_PCT = 0.03            # Kill switch threshold: halt if day's loss > 3%
 OVERNIGHT_ALLOWED = False            # Close every position before market close
 GAP_AGAINST_THRESHOLD_PCT = 0.02     # If position gaps >2% against us at open, flatten before loop
