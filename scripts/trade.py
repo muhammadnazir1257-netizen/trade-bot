@@ -347,10 +347,19 @@ def place_order(symbol: str, qty: float, side: str, limit_price: float) -> dict[
         )
     crypto = is_crypto(symbol)
     # Crypto requires gtc/ioc (not "day") and allows fractional qty; equities
-    # use "day" and (here) whole shares.
+    # use "day" and whole shares.
     tif = _shorting_cfg("CRYPTO_TIME_IN_FORCE", "gtc") if crypto else "day"
     if crypto and _shorting_cfg("ALLOW_FRACTIONAL", True):
-        qty_str = f"{float(qty):.8f}".rstrip("0").rstrip(".")
+        # FLOOR to 8 decimals (Alpaca's precision). Rounding up can request
+        # more than the actual position balance and trigger "insufficient
+        # balance" on closes. Floor guarantees we ask for <= what we hold.
+        import math
+        floored = math.floor(float(qty) * 1e8) / 1e8
+        if floored <= 0:
+            raise ValueError(
+                f"crypto qty {qty} floors to 0 at 8-decimal precision (dust)."
+            )
+        qty_str = f"{floored:.8f}".rstrip("0").rstrip(".")
     else:
         qty_str = str(int(qty)) if float(qty).is_integer() else str(qty)
     # Crypto limit prices can need more precision than 2 dp for low-priced coins

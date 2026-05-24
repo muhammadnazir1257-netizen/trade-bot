@@ -60,6 +60,19 @@ OOS_SPLIT_FRACTION = 0.70           # First 70% of bars = in-sample, last 30% = 
 EDGE_MIN_WINRATE = 0.55             # "Has edge" gate for the discovery report
 EDGE_MIN_PROFIT_FACTOR = 1.30
 
+# --- External data providers (Finnhub + Alpha Vantage) --------------------
+# Defensive: skip NEW entries on any equity with earnings inside this window
+# (binary events are the single biggest avoidable loss source).
+EARNINGS_BLACKOUT_HOURS = 48
+# Sentiment-aware confidence boost: cap how much news sentiment can shift the
+# composite. Combined with chart-pattern boost.
+SENTIMENT_BOOST_MAX = 0.10
+SENTIMENT_MIN_ARTICLES = 3          # Need >= N relevant articles before trusting the score
+# Per-provider cache TTLs (file-cached under models/external_cache/)
+EARNINGS_CACHE_TTL_HOURS = 24
+SENTIMENT_CACHE_TTL_HOURS = 6
+EXTERNAL_CACHE_DIR = "models/external_cache"
+
 # --- Intraday loop ---------------------------------------------------------
 POLL_INTERVAL_SECONDS = 60           # Long-running loop sleep between iterations
 ORB_MINUTES = 30                     # Opening Range duration (9:30–10:00 ET)

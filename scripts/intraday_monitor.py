@@ -50,6 +50,7 @@ import research         # type: ignore  # noqa: E402
 import trade            # type: ignore  # noqa: E402
 import signal_engine    # type: ignore  # noqa: E402
 import kill_switch      # type: ignore  # noqa: E402
+import external_data    # type: ignore  # noqa: E402
 from strategies import market_regime  # noqa: E402
 
 
@@ -460,15 +461,23 @@ def run_iteration() -> dict[str, Any]:
         atr_arr = ind.atr(h5, l5, c5, period=config.ATR_PERIOD) if len(c5) > config.ATR_PERIOD else None
         atr_value = float(atr_arr[-1]) if atr_arr is not None and len(atr_arr) and not np.isnan(atr_arr[-1]) else None
 
-        # Run strategies + patterns + aggregate
+        # Run strategies + patterns + sentiment, then aggregate.
+        # Sentiment (Alpha Vantage) and pattern boost stack into composite
+        # confidence — capped via config to prevent runaway.
         strategy_signals = signal_engine.run_all_strategies(
             symbol, bars_1m, bars_5m, bars_1d, account, positions_list)
         patterns = detect_chart_patterns(bars_5m, bars_1d)
+        sentiment_score = external_data.news_sentiment(symbol)
+        sentiment_boost = float(max(-config.SENTIMENT_BOOST_MAX,
+                                    min(config.SENTIMENT_BOOST_MAX,
+                                        sentiment_score * config.SENTIMENT_BOOST_MAX)))
+        total_boost = _patterns_to_boost(patterns) + sentiment_boost
         composite = signal_engine.aggregate_signals(
-            strategy_signals, regime["regime"], regime["weights"], _patterns_to_boost(patterns))
+            strategy_signals, regime["regime"], regime["weights"], total_boost)
 
         action_taken = "NONE"
         order_info: dict[str, Any] | None = None
+        earnings_blocker = False
 
         # ENTRY — long on BUY, short on SELL. Equities only in the active phase;
         # crypto any time the monitor runs. Flat in this symbol, under the daily
@@ -478,8 +487,14 @@ def run_iteration() -> dict[str, Any]:
                 and composite["signal"] in ("BUY", "SELL")
                 and state.get("trades_today", 0) < config.MAX_DAILY_TRADES
                 and sym_key not in positions_by_sym):
+            # Defensive: never open a new position into a binary earnings event.
+            # has_upcoming_earnings is a no-op for crypto.
+            earnings_blocker = external_data.has_upcoming_earnings(
+                symbol, hours=config.EARNINGS_BLACKOUT_HOURS)
             if not data_fresh:
                 action_taken = "SKIPPED:stale_data"
+            elif earnings_blocker:
+                action_taken = f"SKIPPED:earnings_within_{config.EARNINGS_BLACKOUT_HOURS}h"
             else:
                 side = "buy" if composite["signal"] == "BUY" else "sell"
                 sizing = signal_engine.calculate_position_size(
@@ -538,7 +553,12 @@ def run_iteration() -> dict[str, Any]:
             if decision in ("CLOSE_STOP", "CLOSE_PROFIT", "CLOSE_TIME", "CLOSE_EOD"):
                 current_price = float(position.get("current_price") or last_bar.get("c", 0))
                 qty_held = float(position.get("qty", 0))     # signed
-                if qty_held != 0 and current_price > 0:
+                # Skip dust positions: tiny leftover crypto fractions that can't
+                # be meaningfully closed and would just spam errors each tick.
+                if sym_crypto and abs(qty_held) < 1e-6:
+                    action_taken = "DUST_HELD"
+                    state.get("positions_meta", {}).pop(sym_key, None)
+                elif qty_held != 0 and current_price > 0:
                     if qty_held > 0:   # close a long → SELL
                         close_side, close_qty = "sell", qty_held
                         limit_price = round(current_price * 0.998, 2)
@@ -582,6 +602,9 @@ def run_iteration() -> dict[str, Any]:
             "composite_confidence": composite["confidence"],
             "composite_reason": composite["reason"],
             "patterns_detected": [p["pattern"] for p in patterns],
+            "sentiment_score": sentiment_score,
+            "sentiment_boost": sentiment_boost,
+            "earnings_blocker": earnings_blocker,
             "action_taken": action_taken,
             "order_id": (order_info.get("order", {}) or {}).get("id") if order_info else None,
         })
