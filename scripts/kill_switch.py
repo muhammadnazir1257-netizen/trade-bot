@@ -48,7 +48,20 @@ def check_daily_loss(account_start_value: float, account_current_value: float) -
     """
     if account_start_value <= 0:
         return {"halted": False, "loss_pct": 0.0, "reason": "no start value"}
+    # Guard: a single tick reporting equity <= 0 is an API hiccup, not a real
+    # 100% wipeout. Refuse to trip on garbage input.
+    if account_current_value <= 0:
+        _log(f"check_daily_loss: ignoring bogus current_value={account_current_value}")
+        return {"halted": False, "loss_pct": 0.0,
+                "reason": f"current equity {account_current_value} invalid — likely data hiccup, ignored"}
     loss_pct = (account_start_value - account_current_value) / account_start_value
+    # Sanity floor: a >50% intraday drop without leverage is impossible in
+    # paper trading; treat as data corruption rather than a real loss.
+    if loss_pct >= 0.50:
+        _log(f"check_daily_loss: refusing implausible loss_pct={loss_pct:.4f} "
+             f"(start={account_start_value} current={account_current_value})")
+        return {"halted": False, "loss_pct": loss_pct,
+                "reason": f"implausible loss {loss_pct:.2%} ignored — likely data hiccup"}
     if loss_pct >= config.MAX_DAILY_LOSS_PCT:
         _set_halted(True, f"daily loss {loss_pct:.2%} >= {config.MAX_DAILY_LOSS_PCT:.2%}")
         return {"halted": True, "loss_pct": loss_pct,
