@@ -1,10 +1,16 @@
 """Multi-EMA crossover trend-following strategy.
 
 BUY: EMA8 crosses above EMA21 while EMA21 > EMA55 (bullish alignment),
-     confirmed by MACD histogram > 0.
-SELL: EMA8 crosses below EMA21 while EMA21 < EMA55, MACD histogram < 0.
+     confirmed by MACD histogram > 0 AND ADX >= ADX_TREND_THRESHOLD.
+SELL: EMA8 crosses below EMA21 while EMA21 < EMA55, MACD histogram < 0
+      AND ADX >= ADX_TREND_THRESHOLD.
 
-Runs on 5-minute bars. Stop = EMA55; take-profit = 3:1 reward-to-risk from entry.
+Runs on 5-minute bars. Stop = min(EMA55-distance, 1.5*ATR) — whichever is
+TIGHTER — to keep losses small. Take-profit = 3:1 reward-to-risk from entry.
+
+The ADX gate exists because the prior version got whipsawed in choppy
+regimes (the strategy was auto-benched after a -1.89% SOFI loss on a
+fake cross). Trend-following needs an actual trend.
 """
 
 from __future__ import annotations
@@ -34,7 +40,7 @@ def analyze(symbol: str, bars_1m: list, bars_5m: list, bars_1d: list,
     if not bars_5m or len(bars_5m) < config.EMA_SLOW + config.MACD_SLOW + 5:
         return _hold("insufficient_5m_bars", symbol)
 
-    _, _, _, closes, _ = ind.extract_ohlcv(bars_5m)
+    opens, highs, lows, closes, volumes = ind.extract_ohlcv(bars_5m)
 
     ema_f = ind.ema(closes, config.EMA_FAST)
     ema_m = ind.ema(closes, config.EMA_MID)
@@ -42,58 +48,77 @@ def analyze(symbol: str, bars_1m: list, bars_5m: list, bars_1d: list,
     macd_line, sig_line, hist = ind.macd(
         closes, fast=config.MACD_FAST, slow=config.MACD_SLOW, signal=config.MACD_SIGNAL
     )
+    adx_arr = ind.adx(highs, lows, closes, period=config.ADX_PERIOD)
+    atr_arr = ind.atr(highs, lows, closes, period=config.ATR_PERIOD)
 
     if np.isnan(ema_f[-1]) or np.isnan(ema_m[-1]) or np.isnan(ema_s[-1]):
         return _hold("emas_not_warm", symbol)
     if np.isnan(hist[-1]) or np.isnan(hist[-2]):
         return _hold("macd_not_warm", symbol)
+    if np.isnan(adx_arr[-1]):
+        return _hold("adx_not_warm", symbol)
 
     last_close = float(closes[-1])
     f_prev, f_now = float(ema_f[-2]), float(ema_f[-1])
     m_prev, m_now = float(ema_m[-2]), float(ema_m[-1])
     s_now = float(ema_s[-1])
     h_now = float(hist[-1])
+    adx_now = float(adx_arr[-1])
+    atr_now = float(atr_arr[-1]) if not np.isnan(atr_arr[-1]) else last_close * 0.01
 
     bullish_cross = f_prev <= m_prev and f_now > m_now
     bearish_cross = f_prev >= m_prev and f_now < m_now
     bullish_align = m_now > s_now
     bearish_align = m_now < s_now
 
+    # Trend-strength gate — refuse to fire in chop. This is the primary fix
+    # for the SOFI-style whipsaw losses that auto-benched the strategy.
+    if adx_now < config.ADX_TREND_THRESHOLD:
+        return _hold(
+            f"ADX {adx_now:.1f} < {config.ADX_TREND_THRESHOLD} (no trend)", symbol
+        )
+
     # Distance of EMAs from each other as % of price → trend strength input
     ema_spread_pct = abs(f_now - m_now) / last_close if last_close > 0 else 0.0
-    # Normalize MACD histogram by recent price range so values are bounded
-    recent_atr_arr = ind.atr(*ind.extract_ohlcv(bars_5m)[1:4], period=config.ATR_PERIOD)
-    atr_now = float(recent_atr_arr[-1]) if not np.isnan(recent_atr_arr[-1]) else last_close * 0.01
     hist_norm = min(abs(h_now) / atr_now, 1.0) if atr_now > 0 else 0.0
     confidence = float(max(0.4, min(0.4 + 50 * ema_spread_pct + 0.4 * hist_norm, 1.0)))
 
+    # Tighter stop: take the closer of EMA55 and 1.5*ATR from entry. This
+    # keeps the bad trades small; EMA55 alone can be 2-3% away on choppy
+    # symbols, which is what blew up the prior version.
+    atr_stop_dist = 1.5 * atr_now
+
     if bullish_cross and bullish_align and h_now > 0:
-        stop = s_now
-        risk = last_close - stop
-        if risk <= 0:
+        ema_stop_dist = last_close - s_now
+        stop_dist = min(ema_stop_dist, atr_stop_dist) if ema_stop_dist > 0 else atr_stop_dist
+        if stop_dist <= 0:
             return _hold("invalid_risk_distance_for_buy", symbol)
-        take_profit = last_close + 3.0 * risk
+        stop = last_close - stop_dist
+        take_profit = last_close + 3.0 * stop_dist
         return {
             "signal": "BUY",
             "confidence": confidence,
             "reason": (f"EMA{config.EMA_FAST} crossed above EMA{config.EMA_MID}; "
-                       f"EMA{config.EMA_MID} > EMA{config.EMA_SLOW}; MACD hist {h_now:.3f}>0"),
+                       f"EMA{config.EMA_MID} > EMA{config.EMA_SLOW}; "
+                       f"ADX {adx_now:.1f}; MACD hist {h_now:.3f}>0"),
             "strategy": NAME,
             "entry_price": last_close,
             "stop_loss": float(stop),
             "take_profit": float(take_profit),
         }
     if bearish_cross and bearish_align and h_now < 0:
-        stop = s_now
-        risk = stop - last_close
-        if risk <= 0:
+        ema_stop_dist = s_now - last_close
+        stop_dist = min(ema_stop_dist, atr_stop_dist) if ema_stop_dist > 0 else atr_stop_dist
+        if stop_dist <= 0:
             return _hold("invalid_risk_distance_for_sell", symbol)
-        take_profit = last_close - 3.0 * risk
+        stop = last_close + stop_dist
+        take_profit = last_close - 3.0 * stop_dist
         return {
             "signal": "SELL",
             "confidence": confidence,
             "reason": (f"EMA{config.EMA_FAST} crossed below EMA{config.EMA_MID}; "
-                       f"EMA{config.EMA_MID} < EMA{config.EMA_SLOW}; MACD hist {h_now:.3f}<0"),
+                       f"EMA{config.EMA_MID} < EMA{config.EMA_SLOW}; "
+                       f"ADX {adx_now:.1f}; MACD hist {h_now:.3f}<0"),
             "strategy": NAME,
             "entry_price": last_close,
             "stop_loss": float(stop),
@@ -101,7 +126,8 @@ def analyze(symbol: str, bars_1m: list, bars_5m: list, bars_1d: list,
         }
 
     return _hold(
-        f"no aligned cross (EMA8={f_now:.2f} EMA21={m_now:.2f} EMA55={s_now:.2f} hist={h_now:.3f})",
+        f"no aligned cross (EMA8={f_now:.2f} EMA21={m_now:.2f} EMA55={s_now:.2f} "
+        f"ADX={adx_now:.1f} hist={h_now:.3f})",
         symbol,
     )
 

@@ -1,1 +1,457 @@
-{}
+{
+  "volume_profile": {
+    "wins": 7,
+    "losses": 9,
+    "pnl_sum": 0.005607075004700854,
+    "trades": [
+      {
+        "ts": "2026-05-21T18:25:07.749883+00:00",
+        "symbol": "AAPL",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0012146679360493895
+      },
+      {
+        "ts": "2026-05-21T18:25:08.683445+00:00",
+        "symbol": "MSFT",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.00022702560609855408
+      },
+      {
+        "ts": "2026-05-21T18:45:06.318838+00:00",
+        "symbol": "QQQ",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.0002796772524507355
+      },
+      {
+        "ts": "2026-05-21T18:45:08.267253+00:00",
+        "symbol": "AAPL",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0001313154525457589
+      },
+      {
+        "ts": "2026-05-21T19:00:05.041998+00:00",
+        "symbol": "SPY",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.0021544179032128062
+      },
+      {
+        "ts": "2026-05-21T19:00:06.718983+00:00",
+        "symbol": "NVDA",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.004813587030561747
+      },
+      {
+        "ts": "2026-05-21T19:05:06.963902+00:00",
+        "symbol": "AAPL",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0005418541263013381
+      },
+      {
+        "ts": "2026-05-22T05:30:10.059759+00:00",
+        "symbol": "ETH/USD",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.002058230578086114
+      },
+      {
+        "ts": "2026-05-22T14:30:17.695911+00:00",
+        "symbol": "MSFT",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.005157716277848145
+      },
+      {
+        "ts": "2026-05-22T14:40:10.909516+00:00",
+        "symbol": "QQQ",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.001281551234189501
+      },
+      {
+        "ts": "2026-05-26T15:11:13.438141+00:00",
+        "symbol": "MSFT",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0009879518072289759
+      },
+      {
+        "ts": "2026-05-26T15:20:38.325992+00:00",
+        "symbol": "MARA",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.006798096532970744
+      },
+      {
+        "ts": "2026-05-26T15:30:32.760783+00:00",
+        "symbol": "SPY",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.00240147947100922
+      },
+      {
+        "ts": "2026-05-26T15:50:47.921421+00:00",
+        "symbol": "SPY",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0005283339070291866
+      },
+      {
+        "ts": "2026-05-26T15:50:49.197940+00:00",
+        "symbol": "QQQ",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0007306111790657437
+      },
+      {
+        "ts": "2026-05-26T16:10:26.404132+00:00",
+        "symbol": "AAPL",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.004845784216986397
+      }
+    ],
+    "updated_at": "2026-05-26T16:10:26.404132+00:00"
+  },
+  "momentum_breakout": {
+    "wins": 3,
+    "losses": 5,
+    "pnl_sum": 0.003951747056152512,
+    "trades": [
+      {
+        "ts": "2026-05-21T18:40:05.681886+00:00",
+        "symbol": "SPY",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0002556237218813111
+      },
+      {
+        "ts": "2026-05-22T14:40:11.933403+00:00",
+        "symbol": "NVDA",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.00043794947446062544
+      },
+      {
+        "ts": "2026-05-26T14:41:30.270260+00:00",
+        "symbol": "MSFT",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0006942283293036661
+      },
+      {
+        "ts": "2026-05-26T15:11:18.165559+00:00",
+        "symbol": "SOFI",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.0018621973929237206
+      },
+      {
+        "ts": "2026-05-26T15:30:57.917630+00:00",
+        "symbol": "RIOT",
+        "signal": "BUY",
+        "outcome": "WIN",
+        "pnl_pct": 0.010827532869296254
+      },
+      {
+        "ts": "2026-05-26T16:50:39.379464+00:00",
+        "symbol": "RIOT",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.005005775895263727
+      },
+      {
+        "ts": "2026-05-26T17:00:25.394755+00:00",
+        "symbol": "NVDA",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0007052482298951209
+      },
+      {
+        "ts": "2026-05-29T16:20:11.610437+00:00",
+        "symbol": "MSFT",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.002515056504184263
+      }
+    ],
+    "updated_at": "2026-05-29T16:20:11.610437+00:00"
+  },
+  "vwap_reversion": {
+    "wins": 3,
+    "losses": 5,
+    "pnl_sum": -0.003919703082501272,
+    "trades": [
+      {
+        "ts": "2026-05-21T19:00:09.126389+00:00",
+        "symbol": "MSFT",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.0025610482430017596
+      },
+      {
+        "ts": "2026-05-22T06:40:09.070334+00:00",
+        "symbol": "BTC/USD",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0007576152020193005
+      },
+      {
+        "ts": "2026-05-22T14:20:13.278419+00:00",
+        "symbol": "AAPL",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0009877742692899582
+      },
+      {
+        "ts": "2026-05-22T17:30:15.089089+00:00",
+        "symbol": "IWM",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.003437954634109404
+      },
+      {
+        "ts": "2026-05-22T17:30:16.293691+00:00",
+        "symbol": "IJR",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.00151177365822271
+      },
+      {
+        "ts": "2026-05-26T14:20:52.859199+00:00",
+        "symbol": "RIOT",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.003861003861003916
+      },
+      {
+        "ts": "2026-05-26T14:41:32.003861+00:00",
+        "symbol": "IWM",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.0018589920132195692
+      },
+      {
+        "ts": "2026-05-26T14:50:48.250130+00:00",
+        "symbol": "NVDA",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.002216378285922688
+      }
+    ],
+    "updated_at": "2026-05-26T14:50:48.250130+00:00"
+  },
+  "ema_crossover": {
+    "wins": 0,
+    "losses": 0,
+    "pnl_sum": 0.0,
+    "trades": [],
+    "updated_at": null,
+    "retuned_at": "2026-06-20T05:21:27.301942Z"
+  },
+  "rsi_divergence": {
+    "wins": 5,
+    "losses": 7,
+    "pnl_sum": -6.919260626175026e-05,
+    "trades": [
+      {
+        "ts": "2026-05-26T17:50:28.211638+00:00",
+        "symbol": "IJR",
+        "signal": "BUY",
+        "outcome": "WIN",
+        "pnl_pct": 0.001112536710966814
+      },
+      {
+        "ts": "2026-05-29T16:10:18.878129+00:00",
+        "symbol": "MARA",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.004919071076706456
+      },
+      {
+        "ts": "2026-05-29T16:50:15.841040+00:00",
+        "symbol": "MARA",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.01267605633802815
+      },
+      {
+        "ts": "2026-06-02T17:20:12.925319+00:00",
+        "symbol": "MSFT",
+        "signal": "BUY",
+        "outcome": "WIN",
+        "pnl_pct": 0.00020809313573865652
+      },
+      {
+        "ts": "2026-06-02T19:10:17.585546+00:00",
+        "symbol": "MARA",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0024509803921568727
+      },
+      {
+        "ts": "2026-06-02T19:30:14.964297+00:00",
+        "symbol": "IWM",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.00010293007616835779
+      },
+      {
+        "ts": "2026-06-03T18:50:15.157889+00:00",
+        "symbol": "IWM",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.0005902777777778331
+      },
+      {
+        "ts": "2026-06-03T19:10:11.870117+00:00",
+        "symbol": "QQQ",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.00037658083398217233
+      },
+      {
+        "ts": "2026-06-10T18:20:14.463250+00:00",
+        "symbol": "SOFI",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0028089887640449394
+      },
+      {
+        "ts": "2026-06-11T16:50:15.986937+00:00",
+        "symbol": "RIOT",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0025937749401435646
+      },
+      {
+        "ts": "2026-06-11T19:30:29.617676+00:00",
+        "symbol": "MARA",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0007385524372231584
+      },
+      {
+        "ts": "2026-06-12T17:20:16.204897+00:00",
+        "symbol": "MARA",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0014184397163120265
+      }
+    ],
+    "updated_at": "2026-06-12T17:20:16.204897+00:00"
+  },
+  "squeeze_momentum": {
+    "wins": 6,
+    "losses": 4,
+    "pnl_sum": -0.003827983508715739,
+    "trades": [
+      {
+        "ts": "2026-05-26T19:30:30.262578+00:00",
+        "symbol": "QQQ",
+        "signal": "BUY",
+        "outcome": "WIN",
+        "pnl_pct": 0.0014961018996376852
+      },
+      {
+        "ts": "2026-06-03T17:00:21.647117+00:00",
+        "symbol": "MARA",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.00035816618911180384
+      },
+      {
+        "ts": "2026-06-10T17:50:14.332945+00:00",
+        "symbol": "SOFI",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.003439649781113289
+      },
+      {
+        "ts": "2026-06-12T19:30:21.474484+00:00",
+        "symbol": "MARA",
+        "signal": "BUY",
+        "outcome": "WIN",
+        "pnl_pct": 0.0024946543121881783
+      },
+      {
+        "ts": "2026-06-16T17:50:10.057039+00:00",
+        "symbol": "SPY",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.0005182724252491513
+      },
+      {
+        "ts": "2026-06-16T19:30:16.864611+00:00",
+        "symbol": "IJR",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.0024434515498465703
+      },
+      {
+        "ts": "2026-06-17T16:30:21.951544+00:00",
+        "symbol": "RIOT",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0032798833819241927
+      },
+      {
+        "ts": "2026-06-18T16:50:17.883842+00:00",
+        "symbol": "RIOT",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.0049157303370786715
+      },
+      {
+        "ts": "2026-06-18T17:00:14.570893+00:00",
+        "symbol": "SPY",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.00048190835709411087
+      },
+      {
+        "ts": "2026-06-18T17:30:21.018299+00:00",
+        "symbol": "IJR",
+        "signal": "BUY",
+        "outcome": "WIN",
+        "pnl_pct": 0.0009785419724611364
+      }
+    ],
+    "updated_at": "2026-06-18T17:30:21.018299+00:00"
+  },
+  "support_resistance": {
+    "wins": 2,
+    "losses": 1,
+    "pnl_sum": 0.00793891191707036,
+    "trades": [
+      {
+        "ts": "2026-06-09T15:00:19.598355+00:00",
+        "symbol": "SOFI",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.006774891193339046
+      },
+      {
+        "ts": "2026-06-15T19:30:18.804686+00:00",
+        "symbol": "MARA",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.011768661735036916
+      },
+      {
+        "ts": "2026-06-17T19:30:22.779132+00:00",
+        "symbol": "IWM",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.00294514137537249
+      }
+    ],
+    "updated_at": "2026-06-17T19:30:22.779132+00:00"
+  }
+}
