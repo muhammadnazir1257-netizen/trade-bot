@@ -1,0 +1,101 @@
+# Edge Discovery Report — 2026-07-02
+
+Out-of-sample test: in-sample = first 70% of bars, OOS = the rest. A strategy only counts as having edge if it clears win-rate ≥ 55% and profit factor ≥ 1.3 **out-of-sample** (overfit defense).
+
+Cost model: 5.0 bps slippage/side.
+
+## Strategies with out-of-sample edge
+- None. No strategy/symbol pair cleared the out-of-sample edge gate. This is the *expected* result for textbook strategies on efficient markets — keep paper-trading and let the live accuracy tracker accumulate.
+
+## Full grid (all pairs, OOS win/PF)
+- squeeze_momentum/MSFT: OOS 3t, win 67%, PF 2.64
+- squeeze_momentum/SPY: OOS 2t, win 50%, PF 2.55
+- rsi_divergence/QQQ: OOS 1t, win 100%, PF 2.00
+- momentum_breakout/NVDA: OOS 1t, win 100%, PF 2.00
+- ema_crossover/NVDA: OOS 1t, win 100%, PF 2.00
+- rsi_divergence/NVDA: OOS 1t, win 100%, PF 2.00
+- rsi_divergence/IWM: OOS 2t, win 100%, PF 2.00
+- momentum_breakout/MARA: OOS 2t, win 100%, PF 2.00
+- momentum_breakout/BTC/USD: OOS 2t, win 100%, PF 2.00
+- ema_crossover/MSFT: OOS 2t, win 50%, PF 1.79
+- momentum_breakout/RIOT: OOS 2t, win 50%, PF 1.75
+- squeeze_momentum/ETH/USD: OOS 2t, win 50%, PF 1.60
+- volume_profile/ETH/USD: OOS 10t, win 40%, PF 1.53
+- squeeze_momentum/LTC/USD: OOS 2t, win 50%, PF 1.52
+- momentum_breakout/LTC/USD: OOS 4t, win 50%, PF 1.29
+- momentum_breakout/IJR: OOS 5t, win 60%, PF 1.21
+- squeeze_momentum/AAPL: OOS 2t, win 50%, PF 1.19
+- momentum_breakout/QQQ: OOS 4t, win 50%, PF 0.98
+- momentum_breakout/MSFT: OOS 3t, win 33%, PF 0.89
+- squeeze_momentum/NVDA: OOS 6t, win 33%, PF 0.85
+- momentum_breakout/SPY: OOS 6t, win 67%, PF 0.77
+- volume_profile/AAPL: OOS 4t, win 75%, PF 0.75
+- squeeze_momentum/RIOT: OOS 5t, win 20%, PF 0.60
+- volume_profile/IJR: OOS 14t, win 14%, PF 0.55
+- rsi_divergence/RIOT: OOS 4t, win 75%, PF 0.40
+- rsi_divergence/MARA: OOS 2t, win 50%, PF 0.31
+- momentum_breakout/IWM: OOS 2t, win 50%, PF 0.30
+- rsi_divergence/MSFT: OOS 4t, win 50%, PF 0.24
+- rsi_divergence/AAPL: OOS 3t, win 33%, PF 0.13
+- vwap_reversion/SPY: OOS 0t, win n/a, PF n/a
+- ema_crossover/SPY: OOS 0t, win n/a, PF n/a
+- rsi_divergence/SPY: OOS 0t, win n/a, PF n/a
+- volume_profile/SPY: OOS 0t, win n/a, PF n/a
+- support_resistance/SPY: OOS 0t, win n/a, PF n/a
+- vwap_reversion/QQQ: OOS 0t, win n/a, PF n/a
+- ema_crossover/QQQ: OOS 0t, win n/a, PF n/a
+- volume_profile/QQQ: OOS 0t, win n/a, PF n/a
+- squeeze_momentum/QQQ: OOS 4t, win 0%, PF 0.00
+- support_resistance/QQQ: OOS 0t, win n/a, PF n/a
+- vwap_reversion/NVDA: OOS 0t, win n/a, PF n/a
+- volume_profile/NVDA: OOS 0t, win n/a, PF n/a
+- support_resistance/NVDA: OOS 0t, win n/a, PF n/a
+- vwap_reversion/AAPL: OOS 0t, win n/a, PF n/a
+- momentum_breakout/AAPL: OOS 2t, win 0%, PF 0.00
+- ema_crossover/AAPL: OOS 0t, win n/a, PF n/a
+- support_resistance/AAPL: OOS 0t, win n/a, PF n/a
+- vwap_reversion/MSFT: OOS 0t, win n/a, PF n/a
+- volume_profile/MSFT: OOS 0t, win n/a, PF n/a
+- support_resistance/MSFT: OOS 0t, win n/a, PF n/a
+- vwap_reversion/IWM: OOS 0t, win n/a, PF n/a
+- ema_crossover/IWM: OOS 0t, win n/a, PF n/a
+- volume_profile/IWM: OOS 0t, win n/a, PF n/a
+- squeeze_momentum/IWM: OOS 2t, win 0%, PF 0.00
+- support_resistance/IWM: OOS 0t, win n/a, PF n/a
+- vwap_reversion/IJR: OOS 0t, win n/a, PF n/a
+- ema_crossover/IJR: OOS 1t, win 0%, PF 0.00
+- rsi_divergence/IJR: OOS 0t, win n/a, PF n/a
+- squeeze_momentum/IJR: OOS 1t, win 0%, PF 0.00
+- support_resistance/IJR: OOS 0t, win n/a, PF n/a
+- vwap_reversion/SOFI: OOS 0t, win n/a, PF n/a
+- momentum_breakout/SOFI: OOS 2t, win 0%, PF 0.00
+- ema_crossover/SOFI: OOS 0t, win n/a, PF n/a
+- rsi_divergence/SOFI: OOS 2t, win 0%, PF 0.00
+- volume_profile/SOFI: OOS 0t, win n/a, PF n/a
+- squeeze_momentum/SOFI: OOS 2t, win 0%, PF 0.00
+- support_resistance/SOFI: OOS 0t, win n/a, PF n/a
+- vwap_reversion/RIOT: OOS 0t, win n/a, PF n/a
+- ema_crossover/RIOT: OOS 0t, win n/a, PF n/a
+- volume_profile/RIOT: OOS 0t, win n/a, PF n/a
+- support_resistance/RIOT: OOS 0t, win n/a, PF n/a
+- vwap_reversion/MARA: OOS 0t, win n/a, PF n/a
+- ema_crossover/MARA: OOS 1t, win 0%, PF 0.00
+- volume_profile/MARA: OOS 0t, win n/a, PF n/a
+- squeeze_momentum/MARA: OOS 2t, win 0%, PF 0.00
+- support_resistance/MARA: OOS 0t, win n/a, PF n/a
+- vwap_reversion/BTC/USD: OOS 0t, win n/a, PF n/a
+- ema_crossover/BTC/USD: OOS 0t, win n/a, PF n/a
+- rsi_divergence/BTC/USD: OOS 0t, win n/a, PF n/a
+- volume_profile/BTC/USD: OOS 0t, win n/a, PF n/a
+- squeeze_momentum/BTC/USD: OOS 4t, win 0%, PF 0.00
+- support_resistance/BTC/USD: OOS 0t, win n/a, PF n/a
+- vwap_reversion/ETH/USD: OOS 0t, win n/a, PF n/a
+- momentum_breakout/ETH/USD: OOS 1t, win 0%, PF 0.00
+- ema_crossover/ETH/USD: OOS 0t, win n/a, PF n/a
+- rsi_divergence/ETH/USD: OOS 0t, win n/a, PF n/a
+- support_resistance/ETH/USD: OOS 0t, win n/a, PF n/a
+- vwap_reversion/LTC/USD: OOS 0t, win n/a, PF n/a
+- ema_crossover/LTC/USD: OOS 0t, win n/a, PF n/a
+- rsi_divergence/LTC/USD: OOS 0t, win n/a, PF n/a
+- volume_profile/LTC/USD: OOS 0t, win n/a, PF n/a
+- support_resistance/LTC/USD: OOS 0t, win n/a, PF n/a

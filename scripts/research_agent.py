@@ -158,17 +158,32 @@ def backtest_strategy(strategy_module, symbol: str, lookback_days: int = 90) -> 
                                        "reason": "take_profit"})
                     trades.append(open_trade); open_trade = None
 
-        # Entry logic — only enter if flat
+        # Entry logic — only enter if flat.
+        # Fill at the SIGNAL BAR'S CLOSE, not at the strategy's declared
+        # entry_price: filling at a level the market never traded produced
+        # fantasy stats (2026-07-02 discovery run: volume_profile "filled"
+        # below market at the value-area edge with the target just above —
+        # 486 consecutive wins, PF 916). Live orders rest at ~last close,
+        # so the close is the honest approximation. Signals whose level
+        # geometry is already violated at the fill price are skipped.
         if open_trade is None and sig.get("signal") in ("BUY", "SELL") \
                 and sig.get("entry_price") and sig.get("stop_loss") and sig.get("take_profit"):
-            open_trade = {
-                "side": sig["signal"],
-                "entry_index": i,
-                "entry_price": float(sig["entry_price"]),
-                "stop": float(sig["stop_loss"]),
-                "tp": float(sig["take_profit"]),
-                "confidence": float(sig.get("confidence", 0.0)),
-            }
+            side = sig["signal"]
+            entry_px = last_close
+            stop = float(sig["stop_loss"])
+            tp = float(sig["take_profit"])
+            levels_ok = (stop < entry_px < tp) if side == "BUY" else (tp < entry_px < stop)
+            risk = abs(entry_px - stop)
+            reward = abs(tp - entry_px)
+            if entry_px > 0 and levels_ok and reward > 0 and risk / reward <= 4.0:
+                open_trade = {
+                    "side": side,
+                    "entry_index": i,
+                    "entry_price": entry_px,
+                    "stop": stop,
+                    "tp": tp,
+                    "confidence": float(sig.get("confidence", 0.0)),
+                }
 
     # Force-close any open trade at last close
     if open_trade and len(bars) > open_trade["entry_index"]:
@@ -358,8 +373,20 @@ def _simulate(strategy_module, symbol: str, bars_5m: list, bars_1m: list,
                     open_trade["exit"] = open_trade["tp"]; trades.append(open_trade); open_trade = None
         if open_trade is None and sig.get("signal") in ("BUY", "SELL") \
                 and sig.get("entry_price") and sig.get("stop_loss") and sig.get("take_profit"):
-            open_trade = {"side": sig["signal"], "entry": float(sig["entry_price"]),
-                          "stop": float(sig["stop_loss"]), "tp": float(sig["take_profit"])}
+            # Same honest-fill rules as backtest_strategy: fill at the signal
+            # bar's close (never at an untraded declared level), skip signals
+            # whose stop/target geometry is already violated at the fill, and
+            # skip degenerate geometries risking >4x the reward (those showed
+            # up as thousands of 3-cent "wins" in the PF-916 artifact).
+            side = sig["signal"]
+            entry_px = float(bar.get("c", 0))
+            stop = float(sig["stop_loss"])
+            tp = float(sig["take_profit"])
+            levels_ok = (stop < entry_px < tp) if side == "BUY" else (tp < entry_px < stop)
+            risk = abs(entry_px - stop)
+            reward = abs(tp - entry_px)
+            if entry_px > 0 and levels_ok and reward > 0 and risk / reward <= 4.0:
+                open_trade = {"side": side, "entry": entry_px, "stop": stop, "tp": tp}
     for t in trades:
         if t["side"] == "BUY":
             r = (t["exit"] - t["entry"]) / t["entry"]

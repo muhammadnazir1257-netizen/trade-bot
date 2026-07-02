@@ -121,6 +121,36 @@ python scripts/research.py [bars|news|positions|account|risk] [SYMBOL]
 python scripts/trade.py    [status|order|cancel|validate|orders]
 python scripts/review.py   [review|heartbeat]
 python scripts/notify.py   [journal_path]
+python scripts/analytics.py [report|json] [--archived]   # Sharpe, drawdown, expectancy, per-strategy/side stats
+python scripts/exit_replay.py [--trades]                 # replay real entries through exit-ladder variants
+python scripts/watchdog.py [check|status]                # dead-man's switch (stale heartbeat / halted alerts)
+python scripts/kill_switch.py [status|halt|reset|close-all]
+.venv/Scripts/python.exe -m pytest tests/ -q             # 33-test regression suite (offline, ~0.4s)
 ```
+
+---
+
+## 8. Validation Discipline (added 2026-07-02)
+
+Hard-won rules from the exit-model incident (a plausible "improvement"
+that replay showed would have LOST 4.13% vs +1.43%):
+
+1. **No parameter change ships without evidence.** Before touching exit
+   or entry parameters, run `python scripts/exit_replay.py` (grid mode via
+   `run_grid()`) and require the change to win in BOTH regime halves.
+2. **Run the tests after any code change:** `python -m pytest tests/ -q`.
+   They encode every incident-validated behavior (kill-switch guards,
+   exit ladder, midday gate, hard trading rules). A failing test means
+   the change re-introduces a known-bad behavior.
+3. **Time-of-day gate:** new equity entries are blocked 11:00–13:59 ET
+   (`MIDDAY_NO_ENTRY` in config.py). Replay-validated; do not lift it
+   without re-running the MFE analysis on fresh data.
+4. **The watchdog emails on stale heartbeat / kill-switch trips**
+   (TradeBot-Watchdog task, every 30 min). If you get the alert, check
+   Task Scheduler and `intraday_log/launcher.log`; for phantom halts run
+   `python scripts/kill_switch.py reset`.
+5. **Small-sample humility:** ~60 closed trades is not proof of edge.
+   Re-evaluate with `analytics.py report` at every +50 closed trades;
+   only then consider the next tuning iteration.
 
 When in doubt: protect capital, prefer HOLD, and always leave a written record.
