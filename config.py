@@ -185,6 +185,12 @@ HEARTBEAT_PATH           = "heartbeat.json"
 WATCHLIST_PATH           = "watchlist.json"
 JOURNAL_DIR              = "journal"
 
+# --- Watchdog (dead-man's switch) -------------------------------------------
+# The June 2026 phantom halt went unnoticed for 4 days. The watchdog emails
+# when the heartbeat goes stale or the kill switch engages.
+WATCHDOG_STALE_MINUTES = 30          # heartbeat older than this → alert
+WATCHDOG_ALERT_COOLDOWN_HOURS = 6    # max one email per condition per window
+
 # --- Accuracy tracker tuning ----------------------------------------------
 ACCURACY_BASELINE = 0.5              # Strategies with no history get 0.5 (neutral)
 ACCURACY_DECAY = 0.95                # Exponential decay on past wins/losses per day (recency weighting)

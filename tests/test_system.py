@@ -1,0 +1,313 @@
+"""Regression tests for the trading system's decision logic.
+
+Every test here encodes behavior that was validated the hard way — by a live
+incident or by the exit-replay harness. If one of these fails after a change,
+the change re-introduces a known-bad behavior. Pure logic only: no network,
+no Alpaca calls, no file writes outside tmp.
+
+Run:  .venv/Scripts/python.exe -m pytest tests/ -v
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from datetime import datetime, time, timedelta, timezone
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for _d in (_ROOT, os.path.join(_ROOT, "scripts")):
+    if _d not in sys.path:
+        sys.path.insert(0, _d)
+
+import config                      # noqa: E402
+import kill_switch                 # noqa: E402
+import signal_engine               # noqa: E402
+import intraday_monitor as im      # noqa: E402
+import trade                       # noqa: E402
+import analytics                   # noqa: E402
+import exit_replay                 # noqa: E402
+
+
+# --- kill_switch: the June 4 phantom-halt incident ---------------------------
+
+
+class TestKillSwitch:
+    """check_daily_loss writes heartbeat.json when it trips — point it at a
+    temp file so tests can NEVER halt the production bot. (The watchdog
+    caught exactly that happening on this suite's first run.)"""
+
+    def setup_method(self, method):
+        import tempfile
+        self._real_path = config.HEARTBEAT_PATH
+        self._tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False)
+        self._tmp.write("{}")
+        self._tmp.close()
+        # kill_switch joins _ROOT with this, so give it an absolute escape
+        config.HEARTBEAT_PATH = os.path.relpath(self._tmp.name, _ROOT)
+
+    def teardown_method(self, method):
+        config.HEARTBEAT_PATH = self._real_path
+        try:
+            os.unlink(self._tmp.name)
+        except OSError:
+            pass
+
+    def test_zero_equity_hiccup_does_not_halt(self):
+        """2026-06-04: API returned equity=0 for one tick; bot halted 4 days."""
+        r = kill_switch.check_daily_loss(99941.74, 0.0)
+        assert r["halted"] is False
+
+    def test_negative_equity_does_not_halt(self):
+        assert kill_switch.check_daily_loss(100000, -5)["halted"] is False
+
+    def test_implausible_drop_does_not_halt(self):
+        """>50% intraday without leverage = data corruption, not a loss."""
+        assert kill_switch.check_daily_loss(100000, 40000)["halted"] is False
+
+    def test_real_breach_still_halts(self):
+        r = kill_switch.check_daily_loss(100000, 96500)
+        assert r["halted"] is True and abs(r["loss_pct"] - 0.035) < 1e-9
+
+    def test_within_tolerance_does_not_halt(self):
+        assert kill_switch.check_daily_loss(100000, 98000)["halted"] is False
+
+    def test_gain_does_not_halt(self):
+        assert kill_switch.check_daily_loss(100000, 100500)["halted"] is False
+
+
+# --- monitor_position: replay-validated tight-trail exit ladder --------------
+
+
+def _long_pos(price: float, entry: float = 100.0, qty: float = 10):
+    return {"qty": qty, "avg_entry_price": entry, "current_price": price}
+
+
+class TestExitLadder:
+    def test_trail_arms_immediately_with_default_config(self):
+        """TRAIL_ACTIVATION_R=0.0: peak inits at entry, so the trail must arm
+        on the first tick (the replay-validated scalper behavior)."""
+        meta = {"peak_price": 100.0,
+                "entry_time": datetime.now(timezone.utc).isoformat()}
+        d = im.monitor_position("T", _long_pos(100.1), {"c": 100.1}, 0.4, meta)
+        assert d == "HOLD"
+        assert meta.get("trailing_stop") is not None
+
+    def test_tight_trail_scratches_quickly(self):
+        """A small pullback exits at a scratch, not a full -0.8% stop."""
+        meta = {"peak_price": 100.0,
+                "entry_time": datetime.now(timezone.utc).isoformat()}
+        im.monitor_position("T", _long_pos(100.1), {"c": 100.1}, 0.4, meta)
+        d = im.monitor_position("T", _long_pos(99.88), {"c": 99.88}, 0.4, meta)
+        assert d == "CLOSE_STOP"
+
+    def test_take_profit_fires(self):
+        meta = {"stop_loss": 99.0, "take_profit": 103.0,
+                "entry_time": datetime.now(timezone.utc).isoformat()}
+        d = im.monitor_position("T", _long_pos(103.1), {"c": 103.1}, 0.4, meta)
+        assert d == "CLOSE_PROFIT"
+
+    def test_hard_stop_fires(self):
+        meta = {"stop_loss": 99.0,
+                "entry_time": datetime.now(timezone.utc).isoformat()}
+        d = im.monitor_position("T", _long_pos(98.9), {"c": 98.9}, 0.0, meta)
+        assert d == "CLOSE_STOP"
+
+    def test_time_stop_fires_on_stagnant_position(self):
+        old = (datetime.now(timezone.utc) - timedelta(minutes=200)).isoformat()
+        meta = {"stop_loss": 99.0, "entry_time": old, "peak_price": 100.0}
+        d = im.monitor_position("T", _long_pos(100.05), {"c": 100.05}, 0.0, meta)
+        assert d == "CLOSE_TIME"
+
+    def test_short_side_mirrors(self):
+        meta = {"stop_loss": 101.0, "take_profit": 97.0, "trough_price": 100.0,
+                "entry_time": datetime.now(timezone.utc).isoformat()}
+        pos = {"qty": -10, "avg_entry_price": 100.0, "current_price": 96.9}
+        d = im.monitor_position("T", pos, {"c": 96.9}, 0.4, meta)
+        assert d == "CLOSE_PROFIT"
+
+    def test_dust_qty_holds(self):
+        meta: dict = {}
+        pos = {"qty": 0, "avg_entry_price": 100.0, "current_price": 100.0}
+        assert im.monitor_position("T", pos, {"c": 100.0}, 0.4, meta) == "HOLD"
+
+
+# --- exit_replay.simulate: deterministic ladders ------------------------------
+
+
+def _bar(h, l, c, t="2026-07-02T15:00:00Z"):
+    return {"h": h, "l": l, "c": c, "t": t}
+
+
+class TestReplaySimulate:
+    def test_hard_stop_hit(self):
+        bars = [_bar(100.2, 99.0, 99.1)]
+        r = exit_replay.simulate(100.0, "long", bars, atr=10.0, model="old")
+        assert r["exit"] == "STOP"
+
+    def test_profit_target_hit(self):
+        bars = [_bar(103.0, 99.95, 102.9)]
+        r = exit_replay.simulate(
+            100.0, "long", bars, atr=100.0,
+            model={"trail_mult": 50.0, "activation_r": 99.0, "breakeven_r": None})
+        assert r["exit"] == "PROFIT"
+
+    def test_stop_beats_target_intrabar(self):
+        """Conservative assumption: if a bar spans both, the stop is first."""
+        bars = [_bar(103.0, 99.0, 101.0)]
+        r = exit_replay.simulate(100.0, "long", bars, atr=10.0, model="old")
+        assert r["exit"] == "STOP"
+
+    def test_eod_exit_when_nothing_hits(self):
+        bars = [_bar(100.6, 99.9, 100.5)] * 5
+        r = exit_replay.simulate(
+            100.0, "long", bars, atr=100.0,
+            model={"trail_mult": 50.0, "activation_r": 99.0, "breakeven_r": None})
+        assert r["exit"] == "EOD" and abs(r["pnl"] - 0.005) < 1e-9
+
+
+# --- signal_engine: self-learning multipliers ---------------------------------
+
+
+def _tracker(side: str, wins: int, losses: int) -> dict:
+    trades = []
+    for i in range(wins):
+        trades.append({"symbol": f"W{i}", "ts": f"2026-06-01T{i:02d}:00:00",
+                       "signal": side, "pnl_pct": 0.005})
+    for i in range(losses):
+        trades.append({"symbol": f"L{i}", "ts": f"2026-06-02T{i:02d}:00:00",
+                       "signal": side, "pnl_pct": -0.005})
+    return {"strat": {"trades": trades}}
+
+
+class TestSideMultiplier:
+    def test_neutral_below_min_sample(self):
+        assert signal_engine._side_multiplier(_tracker("BUY", 5, 5), "BUY") == 1.0
+
+    def test_weak_side_clamped_at_floor(self):
+        acc = _tracker("BUY", 6, 24)   # 20% win rate over 30
+        assert signal_engine._side_multiplier(acc, "BUY") == 0.80
+
+    def test_strong_side_clamped_at_ceiling(self):
+        acc = _tracker("SELL", 27, 3)  # 90% win rate over 30
+        assert signal_engine._side_multiplier(acc, "SELL") == 1.15
+
+    def test_duplicate_rows_deduped(self):
+        """One close credits every voting strategy — copies must count once."""
+        acc = _tracker("BUY", 10, 10)
+        acc["strat2"] = {"trades": list(acc["strat"]["trades"])}
+        # 20 unique trades duplicated across two strategies -> still 20 -> active
+        m = signal_engine._side_multiplier(acc, "BUY")
+        assert m == 1.0  # 50% win rate -> neutral, but NOT skipped for n<20
+
+    def test_empty_tracker_neutral(self):
+        assert signal_engine._side_multiplier({}, "BUY") == 1.0
+
+
+class TestAccuracyMultiplier:
+    def test_benched_below_winrate_floor(self):
+        rec = {"wins": 3, "losses": 7,
+               "trades": [{"pnl_pct": 0.001}] * 3 + [{"pnl_pct": -0.002}] * 7}
+        assert signal_engine._accuracy_multiplier(rec) == 0.0
+
+    def test_neutral_below_min_trades(self):
+        rec = {"wins": 1, "losses": 1,
+               "trades": [{"pnl_pct": 0.001}, {"pnl_pct": -0.001}]}
+        assert signal_engine._accuracy_multiplier(rec) == 1.0
+
+
+# --- midday window: replay-validated no-entry gate ----------------------------
+
+
+class TestMiddayWindow:
+    def _at(self, h, m):
+        class _Fake:
+            def time(self):
+                return time(h, m)
+        real = im._now_et
+        im._now_et = lambda: _Fake()
+        try:
+            return im._in_midday_window()
+        finally:
+            im._now_et = real
+
+    def test_boundaries(self):
+        assert self._at(10, 59) is False
+        assert self._at(11, 0) is True
+        assert self._at(12, 30) is True
+        assert self._at(13, 59) is True
+        assert self._at(14, 0) is False
+
+
+# --- trade.validate_order: the hard trading rules -----------------------------
+
+
+_WATCHLIST = {"watchlist": [
+    {"symbol": "SPY", "max_allocation_pct": 5},
+    {"symbol": "MARA", "max_allocation_pct": 5},
+]}
+
+
+class TestValidateOrder:
+    """validate_order consults the live exchange clock (Rule 5) — stub it so
+    the rule checks themselves are testable at any hour."""
+
+    def setup_method(self):
+        self._real_status = trade.get_market_status
+        self._real_account = trade._get_account
+        trade.get_market_status = lambda: {"is_open": True,
+                                           "next_open": "", "next_close": ""}
+        trade._get_account = lambda: {"cash": 100000.0}
+
+    def teardown_method(self):
+        trade.get_market_status = self._real_status
+        trade._get_account = self._real_account
+
+    def test_position_cap_rejected(self):
+        ok, why = trade.validate_order("SPY", 100, "buy", 100.0, 100000, [], _WATCHLIST)
+        assert ok is False and "cap" in why.lower()
+
+    def test_reasonable_buy_accepted(self):
+        ok, why = trade.validate_order("SPY", 30, "buy", 100.0, 100000, [], _WATCHLIST)
+        assert ok is True, why
+
+    def test_zero_qty_rejected(self):
+        ok, _ = trade.validate_order("SPY", 0, "buy", 100.0, 100000, [], _WATCHLIST)
+        assert ok is False
+
+    def test_market_closed_rejected(self):
+        trade.get_market_status = lambda: {"is_open": False,
+                                           "next_open": "", "next_close": ""}
+        ok, why = trade.validate_order("SPY", 30, "buy", 100.0, 100000, [], _WATCHLIST)
+        assert ok is False and "closed" in why.lower()
+
+    def test_cash_reserve_enforced(self):
+        # 20% of 100k equity = 20k reserve; with 22k cash, a 3.2k buy
+        # would leave 18.8k — below the floor, must reject.
+        trade._get_account = lambda: {"cash": 22000.0}
+        ok, why = trade.validate_order("SPY", 32, "buy", 100.0, 100000,
+                                       [], _WATCHLIST)
+        assert ok is False and "reserve" in why.lower()
+
+
+# --- analytics: stat math ------------------------------------------------------
+
+
+class TestAnalytics:
+    def test_bucket_stats_known_values(self):
+        trades = [{"pnl_pct": 0.01}, {"pnl_pct": 0.01}, {"pnl_pct": -0.01},
+                  {"pnl_pct": -0.005}]
+        s = analytics._bucket_stats(trades)
+        assert s["n"] == 4 and s["wins"] == 2
+        assert abs(s["win_rate"] - 0.5) < 1e-9
+        assert abs(s["profit_factor"] - (0.02 / 0.015)) < 1e-9
+
+    def test_return_metrics_drawdown(self):
+        curve = [{"date": f"d{i}", "equity": e}
+                 for i, e in enumerate([100, 110, 99, 104, 108, 103])]
+        m = analytics.return_metrics(curve)
+        assert abs(m["max_drawdown_pct"] - (-10.0)) < 1e-6
+        assert abs(m["total_return_pct"] - 3.0) < 1e-6
+
+    def test_return_metrics_empty(self):
+        assert analytics.return_metrics([])["sharpe"] is None
