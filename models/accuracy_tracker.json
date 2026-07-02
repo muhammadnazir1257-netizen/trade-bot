@@ -248,11 +248,26 @@
     "updated_at": "2026-05-26T14:50:48.250130+00:00"
   },
   "ema_crossover": {
-    "wins": 0,
-    "losses": 0,
-    "pnl_sum": 0.0,
-    "trades": [],
-    "updated_at": null,
+    "wins": 1,
+    "losses": 1,
+    "pnl_sum": -0.0007458974177963571,
+    "trades": [
+      {
+        "ts": "2026-06-23T15:40:16.879378+00:00",
+        "symbol": "MARA",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.006515775034293596
+      },
+      {
+        "ts": "2026-07-02T15:10:17.384700+00:00",
+        "symbol": "MSFT",
+        "signal": "BUY",
+        "outcome": "WIN",
+        "pnl_pct": 0.005769877616497239
+      }
+    ],
+    "updated_at": "2026-07-02T15:10:17.384700+00:00",
     "retuned_at": "2026-06-20T05:21:27.301942Z"
   },
   "rsi_divergence": {
@@ -426,9 +441,9 @@
     "updated_at": "2026-06-18T17:30:21.018299+00:00"
   },
   "support_resistance": {
-    "wins": 2,
-    "losses": 1,
-    "pnl_sum": 0.00793891191707036,
+    "wins": 3,
+    "losses": 3,
+    "pnl_sum": 0.015039615883366888,
     "trades": [
       {
         "ts": "2026-06-09T15:00:19.598355+00:00",
@@ -450,8 +465,29 @@
         "signal": "SELL",
         "outcome": "WIN",
         "pnl_pct": 0.00294514137537249
+      },
+      {
+        "ts": "2026-06-22T18:00:21.854766+00:00",
+        "symbol": "MARA",
+        "signal": "SELL",
+        "outcome": "LOSS",
+        "pnl_pct": -0.011088709677419296
+      },
+      {
+        "ts": "2026-07-01T15:40:19.267189+00:00",
+        "symbol": "MARA",
+        "signal": "BUY",
+        "outcome": "LOSS",
+        "pnl_pct": -0.00826149425287358
+      },
+      {
+        "ts": "2026-07-02T15:30:22.498763+00:00",
+        "symbol": "SOFI",
+        "signal": "SELL",
+        "outcome": "WIN",
+        "pnl_pct": 0.026450907896589403
       }
     ],
-    "updated_at": "2026-06-17T19:30:22.779132+00:00"
+    "updated_at": "2026-07-02T15:30:22.498763+00:00"
   }
 }
