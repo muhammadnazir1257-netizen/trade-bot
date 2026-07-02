@@ -80,6 +80,8 @@ def harvest_entries() -> list[dict[str, Any]]:
                     "ts": row.get("timestamp", ""),
                     "direction": "short" if act == "SHORT_OPENED" else "long",
                     "entry": limit_price,
+                    "confidence": float(s.get("composite_confidence") or 0.0),
+                    "regime": row.get("regime", "?"),
                 })
     return entries
 

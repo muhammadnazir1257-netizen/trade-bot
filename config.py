@@ -37,6 +37,17 @@ CLOSE_RETRY_MINUTES = 15             # unfilled close order older than this → 
 TIME_STOP_MINUTES = 90               # Exit if not moving in our direction after 90 min
 TIME_STOP_MIN_MOVE_PCT = 0.005       # "Not moving" = less than 0.5% favorable
 
+# --- Entry time-of-day filter (replay-validated 2026-07-02) ----------------
+# MFE analysis of all 57 real entries: open-window entries averaged
+# +0.317%/trade (median MFE 1.70%); midday entries -0.078%/trade (median MFE
+# 0.44%), negative in BOTH the trending and ranging halves of the sample.
+# Composite confidence had no predictive power midday (high-conf midday
+# entries lost MORE). Skipping midday lifted replay cum P&L +1.43% → +3.69%.
+# Equities only; position management still runs during the window.
+MIDDAY_NO_ENTRY = True
+MIDDAY_START_ET = "11:00"
+MIDDAY_END_ET   = "14:00"
+
 # --- Long / short ----------------------------------------------------------
 SHORTING_ENABLED = True              # Allow SELL composites to open short positions
 MAX_GROSS_EXPOSURE_PCT = 1.5         # Cap on gross |long|+|short| exposure (150% of equity)

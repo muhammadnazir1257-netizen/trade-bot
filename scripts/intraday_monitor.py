@@ -65,6 +65,17 @@ def _today_et_str() -> str:
     return _now_et().strftime("%Y-%m-%d")
 
 
+def _in_midday_window() -> bool:
+    """True during the midday no-entry window (ET). See MIDDAY_NO_ENTRY."""
+    try:
+        h1, m1 = (int(x) for x in config.MIDDAY_START_ET.split(":"))
+        h2, m2 = (int(x) for x in config.MIDDAY_END_ET.split(":"))
+    except (AttributeError, ValueError):
+        return False
+    now = _now_et().time()
+    return time(h1, m1) <= now < time(h2, m2)
+
+
 def _phase() -> str:
     """Classify the current minute into a trading-day phase.
 
@@ -526,6 +537,12 @@ def run_iteration() -> dict[str, Any]:
                 action_taken = "SKIPPED:stale_data"
             elif earnings_blocker:
                 action_taken = f"SKIPPED:earnings_within_{config.EARNINGS_BLACKOUT_HOURS}h"
+            elif not sym_crypto and config.MIDDAY_NO_ENTRY and _in_midday_window():
+                # Replay-validated (exit_replay 2026-07-02): midday equity
+                # entries were -0.078%/trade in BOTH regime halves; skipping
+                # them lifted replay cum P&L from +1.43% to +3.69%. Composite
+                # confidence showed no predictive power in this window.
+                action_taken = "SKIPPED:midday_window"
             else:
                 side = "buy" if composite["signal"] == "BUY" else "sell"
                 sizing = signal_engine.calculate_position_size(
