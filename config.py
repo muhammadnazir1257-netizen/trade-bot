@@ -21,14 +21,18 @@ MIN_POSITION_PCT = 0.015             # was 0.01 — slightly larger floor in HIG
 CASH_RESERVE_PCT = 0.20              # SACRED — always keep 20% cash
 
 # --- Risk management -------------------------------------------------------
-# Exit tuning (2026-07-02, evidence-based): logs showed 57 stop exits vs only
-# 10 profit-target exits — the old 0.5×ATR trail that armed at entry was
-# clipping winners on the first noise wiggle, so avg win << avg loss.
-# New model: give the trade room until it earns +1R, then protect it.
+# Exit params validated by replay (scripts/exit_replay.py, 2026-07-02):
+# 57 real entries were re-simulated on historical 5-min bars under 9 exit
+# ladders. The tight always-on 0.5×ATR trail beat every "give it room"
+# variant (+1.43% cum / PF 1.29 vs -0.5%..-5.8% / PF<1.0), and was the only
+# ladder positive in the trending half of the sample. These entries have
+# tiny favorable excursions — the scalper trail monetizes them; looser
+# exits let them decay into full stops. Do NOT loosen these without
+# re-running the replay grid on fresh data.
 STOP_LOSS_PCT = 0.008                # 0.8% hard stop (strategy can override)
-TRAILING_STOP_ATR_MULT = 1.5         # was 0.5 — trail loose enough to let winners run
-TRAIL_ACTIVATION_R = 1.0             # trailing stop arms only after +1R favorable move
-BREAKEVEN_AT_R = 1.0                 # at +1R, move the hard stop to entry (free trade)
+TRAILING_STOP_ATR_MULT = 0.5         # tight scalper trail — replay-validated
+TRAIL_ACTIVATION_R = 0.0             # trail arms immediately
+BREAKEVEN_AT_R = 0.5                 # stop to entry at +0.5R (no-op vs tight trail, cheap insurance)
 CLOSE_RETRY_MINUTES = 15             # unfilled close order older than this → cancel & re-place
 TIME_STOP_MINUTES = 90               # Exit if not moving in our direction after 90 min
 TIME_STOP_MIN_MOVE_PCT = 0.005       # "Not moving" = less than 0.5% favorable
