@@ -176,6 +176,18 @@ def cancel_all_orders() -> dict[str, Any]:
         return {"canceled": 0, "error": str(exc)}
 
 
+def cancel_order(order_id: str) -> dict[str, Any]:
+    """Cancel one open order by id. Returns ``{"canceled": bool, ...}``."""
+    if not order_id:
+        return {"canceled": False, "error": "no order id"}
+    try:
+        _request("DELETE", f"/v2/orders/{order_id}")
+        return {"canceled": True, "order_id": order_id}
+    except RuntimeError as exc:
+        _log(f"cancel_order({order_id}) error: {exc}")
+        return {"canceled": False, "order_id": order_id, "error": str(exc)}
+
+
 def validate_order(
     symbol: str,
     qty: float,

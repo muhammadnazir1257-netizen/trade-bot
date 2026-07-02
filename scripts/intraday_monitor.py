@@ -331,12 +331,30 @@ def monitor_position(symbol: str, position: dict, current_bar: dict,
     is_long = qty > 0
     take_profit = float(meta.get("take_profit") or 0.0)
 
+    # R = initial risk per share (entry → initial stop distance). Persisted on
+    # first sight so a later breakeven move doesn't shrink it.
+    if meta.get("initial_risk") is None:
+        if is_long:
+            init_stop = float(meta.get("stop_loss") or avg_entry * (1 - config.STOP_LOSS_PCT))
+            meta["initial_risk"] = max(avg_entry - init_stop, avg_entry * 0.001)
+        else:
+            init_stop = float(meta.get("stop_loss") or avg_entry * (1 + config.STOP_LOSS_PCT))
+            meta["initial_risk"] = max(init_stop - avg_entry, avg_entry * 0.001)
+    r_unit = float(meta["initial_risk"])
+
     if is_long:
         hard_stop = float(meta.get("stop_loss") or avg_entry * (1 - config.STOP_LOSS_PCT))
-        # Trailing stop trails the peak upward; only ever moves up.
         peak = max(float(meta.get("peak_price") or current_price), current_price)
         meta["peak_price"] = peak
-        if atr_value and atr_value > 0:
+        favorable_dist = current_price - avg_entry
+        # At +1R the trade has earned protection: stop moves to breakeven.
+        if favorable_dist >= config.BREAKEVEN_AT_R * r_unit and hard_stop < avg_entry:
+            hard_stop = avg_entry
+            meta["stop_loss"] = avg_entry
+        # Trailing stop arms only after the trade is meaningfully in profit —
+        # trailing from bar one just donates the position to noise.
+        if (atr_value and atr_value > 0
+                and peak - avg_entry >= config.TRAIL_ACTIVATION_R * r_unit):
             trail = peak - config.TRAILING_STOP_ATR_MULT * atr_value
             meta["trailing_stop"] = max(float(meta.get("trailing_stop") or 0.0), trail)
         effective_stop = max(hard_stop, float(meta.get("trailing_stop") or 0.0))
@@ -344,14 +362,19 @@ def monitor_position(symbol: str, position: dict, current_bar: dict,
             return "CLOSE_STOP"
         if take_profit and current_price >= take_profit:
             return "CLOSE_PROFIT"
-        favorable_move = (current_price - avg_entry) / avg_entry
+        favorable_move = favorable_dist / avg_entry
     else:
         # Short: stop is ABOVE entry, take-profit BELOW, trailing stop trails
         # the trough downward; only ever moves down.
         hard_stop = float(meta.get("stop_loss") or avg_entry * (1 + config.STOP_LOSS_PCT))
         trough = min(float(meta.get("trough_price") or current_price), current_price)
         meta["trough_price"] = trough
-        if atr_value and atr_value > 0:
+        favorable_dist = avg_entry - current_price
+        if favorable_dist >= config.BREAKEVEN_AT_R * r_unit and hard_stop > avg_entry:
+            hard_stop = avg_entry
+            meta["stop_loss"] = avg_entry
+        if (atr_value and atr_value > 0
+                and avg_entry - trough >= config.TRAIL_ACTIVATION_R * r_unit):
             trail = trough + config.TRAILING_STOP_ATR_MULT * atr_value
             prev = meta.get("trailing_stop")
             meta["trailing_stop"] = trail if prev is None else min(float(prev), trail)
@@ -361,7 +384,7 @@ def monitor_position(symbol: str, position: dict, current_bar: dict,
             return "CLOSE_STOP"
         if take_profit and current_price <= take_profit:
             return "CLOSE_PROFIT"
-        favorable_move = (avg_entry - current_price) / avg_entry
+        favorable_move = favorable_dist / avg_entry
 
     # Time stop — entered too long ago without favorable movement (either side)
     entry_time = meta.get("entry_time")
@@ -414,6 +437,14 @@ def run_iteration() -> dict[str, Any]:
     positions_list = research.get_positions()
     # Key by normalized symbol so "BTC/USD" (orders) matches "BTCUSD" (positions).
     positions_by_sym = {p["symbol"].upper().replace("/", ""): p for p in positions_list}
+
+    # Prune metas whose close order has filled (position gone). Only metas
+    # with a submitted close are pruned — pending-entry metas must survive
+    # until their entry order fills and the position appears.
+    for _k in list(state.get("positions_meta", {}).keys()):
+        _m = state["positions_meta"].get(_k) or {}
+        if _m.get("close_order_id") and _k not in positions_by_sym:
+            state["positions_meta"].pop(_k, None)
 
     # Daily-loss kill switch
     ks_status = kill_switch.check_daily_loss(state["start_equity"], float(account.get("equity", 0.0)))
@@ -559,37 +590,66 @@ def run_iteration() -> dict[str, Any]:
                     action_taken = "DUST_HELD"
                     state.get("positions_meta", {}).pop(sym_key, None)
                 elif qty_held != 0 and current_price > 0:
-                    if qty_held > 0:   # close a long → SELL
-                        close_side, close_qty = "sell", qty_held
-                        limit_price = round(current_price * 0.998, 2)
-                    else:              # cover a short → BUY
-                        close_side, close_qty = "buy", abs(qty_held)
-                        limit_price = round(current_price * 1.002, 2)
-                    try:
-                        order = trade.place_order(symbol, close_qty, close_side, limit_price)
-                        action_taken = decision
-                        order_info = {"order": order, "exit_reason": decision}
-                        placed_orders.append(order)
-                        # Accuracy close-loop: realised P&L → credit/charge each
-                        # strategy that voted to open this position.
-                        avg_entry = float(position.get("avg_entry_price", current_price))
-                        if qty_held > 0:
-                            pnl_pct = (current_price - avg_entry) / avg_entry if avg_entry else 0.0
+                    # Pending-close guard: a limit close that hasn't filled yet
+                    # must not trigger a second close (Alpaca rejects it as a
+                    # wash trade / insufficient qty — seen live on MARA 6/11).
+                    pending_id = meta.get("close_order_id")
+                    pending_at = meta.get("close_submitted_at")
+                    proceed = True
+                    if pending_id and pending_at:
+                        try:
+                            t0 = datetime.fromisoformat(pending_at)
+                            age_min = (datetime.now(timezone.utc) - t0).total_seconds() / 60.0
+                        except (ValueError, TypeError):
+                            age_min = None
+                        if age_min is not None and age_min < config.CLOSE_RETRY_MINUTES:
+                            action_taken = "CLOSE_PENDING"
+                            proceed = False
                         else:
-                            pnl_pct = (avg_entry - current_price) / avg_entry if avg_entry else 0.0
-                        outcome = "WIN" if pnl_pct > 0 else "LOSS"
-                        direction = "BUY" if qty_held > 0 else "SELL"
-                        for strat in meta.get("opening_strategies", []):
+                            # Stale unfilled close — cancel it and re-place at a
+                            # fresh price so the position doesn't hang open.
                             try:
-                                signal_engine.update_accuracy_tracker(
-                                    symbol, strat, direction, outcome, pnl_pct)
+                                trade.cancel_order(pending_id)
                             except Exception as exc:  # noqa: BLE001
-                                print(f"[intraday_monitor] accuracy update failed: {exc}",
+                                print(f"[intraday_monitor] cancel stale close failed: {exc}",
                                       file=sys.stderr)
-                        # Clear per-symbol meta now that we're flat
-                        state.get("positions_meta", {}).pop(sym_key, None)
-                    except Exception as exc:  # noqa: BLE001
-                        action_taken = f"CLOSE_FAILED:{exc}"
+                    if proceed:
+                        if qty_held > 0:   # close a long → SELL
+                            close_side, close_qty = "sell", qty_held
+                            limit_price = round(current_price * 0.998, 2)
+                        else:              # cover a short → BUY
+                            close_side, close_qty = "buy", abs(qty_held)
+                            limit_price = round(current_price * 1.002, 2)
+                        try:
+                            order = trade.place_order(symbol, close_qty, close_side, limit_price)
+                            action_taken = decision
+                            order_info = {"order": order, "exit_reason": decision}
+                            placed_orders.append(order)
+                            meta["close_order_id"] = (order or {}).get("id")
+                            meta["close_submitted_at"] = datetime.now(timezone.utc).isoformat()
+                            # Accuracy close-loop: realised P&L → credit/charge each
+                            # strategy that voted to open this position. Guarded so
+                            # a re-placed close can't double-record the outcome.
+                            if not meta.get("close_recorded"):
+                                avg_entry = float(position.get("avg_entry_price", current_price))
+                                if qty_held > 0:
+                                    pnl_pct = (current_price - avg_entry) / avg_entry if avg_entry else 0.0
+                                else:
+                                    pnl_pct = (avg_entry - current_price) / avg_entry if avg_entry else 0.0
+                                outcome = "WIN" if pnl_pct > 0 else "LOSS"
+                                direction = "BUY" if qty_held > 0 else "SELL"
+                                for strat in meta.get("opening_strategies", []):
+                                    try:
+                                        signal_engine.update_accuracy_tracker(
+                                            symbol, strat, direction, outcome, pnl_pct)
+                                    except Exception as exc:  # noqa: BLE001
+                                        print(f"[intraday_monitor] accuracy update failed: {exc}",
+                                              file=sys.stderr)
+                                meta["close_recorded"] = True
+                            # Meta stays until the position is confirmed flat —
+                            # pruned at the top of the next iteration.
+                        except Exception as exc:  # noqa: BLE001
+                            action_taken = f"CLOSE_FAILED:{exc}"
 
         signals_out.append({
             "symbol": symbol,

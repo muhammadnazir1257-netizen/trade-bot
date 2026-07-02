@@ -32,6 +32,7 @@ except Exception:  # pragma: no cover
 import config            # noqa: E402
 import research          # type: ignore  # noqa: E402
 import notify            # type: ignore  # noqa: E402
+import analytics         # type: ignore  # noqa: E402
 
 
 def _log(msg: str) -> None:
@@ -80,8 +81,12 @@ def build_journal(date_str: str) -> str:
     daily_pnl = equity - start_equity
     daily_pnl_pct = (daily_pnl / start_equity * 100) if start_equity else 0.0
 
-    # Collect actions and signals across the day
+    # Collect actions and signals across the day. DUST_HELD and CLOSE_PENDING
+    # are bookkeeping states, not orders — hundreds of them per day were
+    # drowning the trades table in noise.
+    _NOISE_ACTIONS = ("NONE", "", "DUST_HELD", "CLOSE_PENDING")
     orders_placed = []
+    dust_ticks = 0
     regime_seen = "unknown"
     composite_counts = {"BUY": 0, "SELL": 0, "HOLD": 0}
     for r in rows:
@@ -90,7 +95,10 @@ def build_journal(date_str: str) -> str:
             cs = s.get("composite_signal", "HOLD")
             composite_counts[cs] = composite_counts.get(cs, 0) + 1
             act = s.get("action_taken", "NONE")
-            if act not in ("NONE", "") and not act.startswith("REJECTED"):
+            if act == "DUST_HELD":
+                dust_ticks += 1
+                continue
+            if act not in _NOISE_ACTIONS and not act.startswith("REJECTED"):
                 orders_placed.append({
                     "time": r.get("timestamp", "")[11:19],
                     "symbol": s.get("symbol"),
@@ -100,11 +108,19 @@ def build_journal(date_str: str) -> str:
                     "order_id": s.get("order_id"),
                 })
 
+    # Dust crypto leftovers (unsellable sub-1e-6 fractions worth < $0.01)
+    # are summarized in one clause instead of scaring the report with
+    # phantom -20% "positions".
+    real_positions = [p for p in positions if abs(float(p.get("qty", 0))) >= 1e-6]
+    dust_positions = [p for p in positions if abs(float(p.get("qty", 0))) < 1e-6]
     pos_list = ", ".join(
         f"{p['symbol']} {'SHORT' if p['qty'] < 0 else 'LONG'} {abs(p['qty']):g} "
         f"@ ${p['avg_entry_price']:.2f} ({p['unrealized_plpc']*100:+.2f}%)"
-        for p in positions
+        for p in real_positions
     ) or "none"
+    if dust_positions:
+        pos_list += (f" (+{len(dust_positions)} dust crypto remnant(s) "
+                     f"< $0.01 total, unsellable)")
 
     # Accuracy tracker summary (per-strategy win rates from the close-loop)
     acc_lines = []
@@ -145,11 +161,22 @@ def build_journal(date_str: str) -> str:
     else:
         lines.append("| — | ALL | HOLD | — | — | No orders placed today (no consensus signals crossed threshold). |")
 
+    # Lifetime performance block (equity curve, Sharpe, expectancy) — computed
+    # from the same logs, fails soft if analytics can't run.
+    perf_lines: list[str] = []
+    try:
+        perf_lines = analytics.summary_lines()
+    except Exception as exc:  # noqa: BLE001
+        _log(f"analytics summary failed: {exc}")
+
     lines += [
         "",
         "## Signal Summary",
         f"- Composite signals across the day: BUY {composite_counts.get('BUY',0)}, "
         f"SELL {composite_counts.get('SELL',0)}, HOLD {composite_counts.get('HOLD',0)}",
+        "",
+        "## Performance (lifetime)",
+        *(perf_lines or ["- analytics unavailable"]),
         "",
         "## Strategy Accuracy (lifetime, from close-loop)",
         *(acc_lines or ["- No closed trades recorded yet."]),

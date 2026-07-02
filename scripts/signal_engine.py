@@ -128,28 +128,32 @@ def aggregate_signals(signals: list[dict[str, Any]], regime: str,
 
     if buy_share >= max(config.CONSENSUS_THRESHOLD, sell_share):
         composite_signal = "BUY"
-        composite_conf = min(1.0, buy_share + pattern_boost)
+        side_mult = _side_multiplier(accuracy, "BUY")
+        composite_conf = min(1.0, (buy_share + pattern_boost) * side_mult)
         if buy_w > 0:
             entry_price = buy_entry / buy_w
             stop = buy_stop / buy_w if buy_stop > 0 else None
             tp = buy_tp / buy_w if buy_tp > 0 else None
         else:
             entry_price, stop, tp = None, None, None
-        reason = f"BUY consensus {buy_share:.2%}; pattern_boost {pattern_boost:+.3f}"
+        reason = (f"BUY consensus {buy_share:.2%}; pattern_boost {pattern_boost:+.3f}; "
+                  f"side_mult {side_mult:.2f}")
         owners = [c["strategy"] for c in components if c["signal"] == "BUY" and c["weight"] > 0]
         return _compose(composite_signal, composite_conf, reason, components,
                         entry_price, stop, tp, owners)
 
     if sell_share >= max(config.CONSENSUS_THRESHOLD, buy_share):
         composite_signal = "SELL"
-        composite_conf = min(1.0, sell_share + abs(min(pattern_boost, 0.0)))
+        side_mult = _side_multiplier(accuracy, "SELL")
+        composite_conf = min(1.0, (sell_share + abs(min(pattern_boost, 0.0))) * side_mult)
         if sell_w > 0:
             entry_price = sell_entry / sell_w
             stop = sell_stop / sell_w if sell_stop > 0 else None
             tp = sell_tp / sell_w if sell_tp > 0 else None
         else:
             entry_price, stop, tp = None, None, None
-        reason = f"SELL consensus {sell_share:.2%}; pattern_boost {pattern_boost:+.3f}"
+        reason = (f"SELL consensus {sell_share:.2%}; pattern_boost {pattern_boost:+.3f}; "
+                  f"side_mult {side_mult:.2f}")
         owners = [c["strategy"] for c in components if c["signal"] == "SELL" and c["weight"] > 0]
         return _compose(composite_signal, composite_conf, reason, components,
                         entry_price, stop, tp, owners)
@@ -258,6 +262,39 @@ def update_accuracy_tracker(symbol: str, strategy: str, signal: str,
 
 
 # --- Internal helpers ------------------------------------------------------
+
+
+def _side_multiplier(accuracy: dict, side: str) -> float:
+    """Directional self-learning: scale composite confidence by how this
+    account has actually performed on this side (BUY = longs, SELL = shorts).
+
+    Live data 2026-07-02: longs 30% win rate / PF 0.63, shorts 54% / PF 1.52
+    over 62 deduped closes — the engine's long signals have been much weaker
+    than its shorts. Rather than hard-gating a side (overfit risk on a small
+    sample), scale sizing confidence, bounded to [0.80, 1.15], and only once
+    the side has >= 20 deduped closes.
+
+    Rows are deduped by (symbol, minute, pnl) because one position close
+    credits every strategy that voted for it.
+    """
+    seen: set = set()
+    pnls: list[float] = []
+    for rec in accuracy.values():
+        if not isinstance(rec, dict):
+            continue
+        for t in rec.get("trades", []):
+            key = (t.get("symbol"), str(t.get("ts", ""))[:16],
+                   round(float(t.get("pnl_pct", 0.0)), 10))
+            if key in seen:
+                continue
+            seen.add(key)
+            if t.get("signal") == side:
+                pnls.append(float(t.get("pnl_pct", 0.0)))
+    if len(pnls) < 20:
+        return 1.0
+    win_rate = sum(1 for p in pnls if p > 0) / len(pnls)
+    mult = 1.0 + (win_rate - 0.50) * 1.5   # 50% win rate → neutral
+    return max(0.80, min(1.15, mult))
 
 
 def _accuracy_multiplier(record: dict) -> float:

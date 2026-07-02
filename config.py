@@ -21,8 +21,15 @@ MIN_POSITION_PCT = 0.015             # was 0.01 — slightly larger floor in HIG
 CASH_RESERVE_PCT = 0.20              # SACRED — always keep 20% cash
 
 # --- Risk management -------------------------------------------------------
+# Exit tuning (2026-07-02, evidence-based): logs showed 57 stop exits vs only
+# 10 profit-target exits — the old 0.5×ATR trail that armed at entry was
+# clipping winners on the first noise wiggle, so avg win << avg loss.
+# New model: give the trade room until it earns +1R, then protect it.
 STOP_LOSS_PCT = 0.008                # 0.8% hard stop (strategy can override)
-TRAILING_STOP_ATR_MULT = 0.5         # Trail by 0.5 × ATR
+TRAILING_STOP_ATR_MULT = 1.5         # was 0.5 — trail loose enough to let winners run
+TRAIL_ACTIVATION_R = 1.0             # trailing stop arms only after +1R favorable move
+BREAKEVEN_AT_R = 1.0                 # at +1R, move the hard stop to entry (free trade)
+CLOSE_RETRY_MINUTES = 15             # unfilled close order older than this → cancel & re-place
 TIME_STOP_MINUTES = 90               # Exit if not moving in our direction after 90 min
 TIME_STOP_MIN_MOVE_PCT = 0.005       # "Not moving" = less than 0.5% favorable
 
