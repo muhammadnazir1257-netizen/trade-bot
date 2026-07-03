@@ -20,7 +20,20 @@ MAX_POSITION_PCT = 0.08              # was 0.04 — 8% for high-confidence in tr
 MIN_POSITION_PCT = 0.015             # was 0.01 — slightly larger floor in HIGH_VOLATILITY
 CASH_RESERVE_PCT = 0.20              # SACRED — always keep 20% cash
 
-# --- Risk management -------------------------------------------------------
+# --- Risk management ---------------------------------------------------------
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║ IMMUTABLE RISK FLOOR — no strategy, tuning pass, or "improvement" may     ║
+# ║ loosen these. Enforced OUTSIDE strategy code (trade.validate_order +      ║
+# ║ kill_switch), so a bad strategy cannot bypass them:                       ║
+# ║   • Position cap: min(5% global, per-symbol max_allocation_pct)           ║
+# ║   • Cash reserve: ≥ 20% of equity at all times                            ║
+# ║   • Max open positions: MAX_OPEN_POSITIONS distinct symbols               ║
+# ║   • Daily-loss kill switch: MAX_DAILY_LOSS_PCT halts all trading          ║
+# ║   • Limit orders only; market orders are rejected                         ║
+# ║   • Gross exposure ≤ MAX_GROSS_EXPOSURE_PCT of equity                     ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+MAX_OPEN_POSITIONS = 8               # distinct symbols with open positions (dust excluded)
+
 # Exit params validated by replay (scripts/exit_replay.py, 2026-07-02):
 # 57 real entries were re-simulated on historical 5-min bars under 9 exit
 # ladders. The tight always-on 0.5×ATR trail beat every "give it room"

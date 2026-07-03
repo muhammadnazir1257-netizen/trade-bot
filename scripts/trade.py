@@ -264,6 +264,20 @@ def validate_order(
 
     notional = qty * current_price
     held = next((p for p in current_positions if _norm(p.get("symbol", "")) == _norm(symbol)), None)
+
+    # IMMUTABLE: max open positions. Only gates orders that would OPEN a new
+    # symbol; adds, covers, and closes on existing positions always pass.
+    if held is None:
+        max_open = _shorting_cfg("MAX_OPEN_POSITIONS", 8)
+        open_count = sum(
+            1 for p in current_positions
+            if abs(float(p.get("qty", 0) or 0)) >= 1e-6
+        )
+        if open_count >= max_open:
+            return False, (
+                f"Max-open-positions breach: {open_count} symbols already open "
+                f"(cap {max_open}); cannot open new position in {symbol}."
+            )
     # Alpaca reports short positions with negative qty / market_value.
     held_qty = float(held["qty"]) if held else 0.0          # signed: + long, - short
     held_mv = float(held["market_value"]) if held else 0.0  # signed
