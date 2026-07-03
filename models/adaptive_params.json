@@ -1,0 +1,10 @@
+{
+  "overrides": {
+    "TRAILING_STOP_ATR_MULT": 0.4,
+    "TRAIL_ACTIVATION_R": 0.0,
+    "BREAKEVEN_AT_R": 0.5
+  },
+  "evidence": "replay 57 entries: tighter_0.4 beat champion in both halves",
+  "updated_at": "2026-07-03T08:29:10.217161+00:00",
+  "updated_by": "self_improve"
+}

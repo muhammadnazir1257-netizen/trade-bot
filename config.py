@@ -213,3 +213,63 @@ WATCHDOG_ALERT_COOLDOWN_HOURS = 6    # max one email per condition per window
 ACCURACY_BASELINE = 0.5              # Strategies with no history get 0.5 (neutral)
 ACCURACY_DECAY = 0.95                # Exponential decay on past wins/losses per day (recency weighting)
 ACCURACY_MIN_TRADES = 5              # Require at least N closed trades before tracker influences weight
+ROLLING_LEARNING_WINDOW = 50         # Self-learning judges the last N closed trades, not lifetime
+                                     # totals — a benched strategy that fixes itself can come back,
+                                     # and a decayed one can't coast on old wins.
+
+# --- Self-modification channel (adaptive parameter overrides) ---------------
+# The ONLY path by which the program changes its own behavior autonomously.
+# scripts/self_improve.py writes models/adaptive_params.json after its
+# evidence gates pass (replay wins BOTH regime halves + full test suite).
+# Overrides are whitelisted and hard-clamped below; anything else in the
+# file — especially risk-floor keys — is ignored and logged. Delete the
+# file to revert to the source defaults instantly.
+ADAPTIVE_PARAMS_PATH = "models/adaptive_params.json"
+ADAPTIVE_WHITELIST = {
+    #  key                     (min,   max)
+    "TRAILING_STOP_ATR_MULT": (0.3,   2.0),
+    "TRAIL_ACTIVATION_R":     (0.0,   2.0),
+    "BREAKEVEN_AT_R":         (0.25,  2.0),
+    "TIME_STOP_MINUTES":      (30,    240),
+    "TIME_STOP_MIN_MOVE_PCT": (0.001, 0.02),
+    "CONSENSUS_THRESHOLD":    (0.50,  0.80),
+    "SENTIMENT_BOOST_MAX":    (0.0,   0.15),
+    "PATTERN_BOOST_MAX":      (0.0,   0.20),
+    "EDGE_WEIGHT_MAX":        (1.0,   3.0),
+}
+
+
+def _apply_adaptive_overrides() -> dict:
+    """Load evidence-gated parameter overrides. Whitelist + clamp; risk-floor
+    keys are structurally impossible to override (not in the whitelist)."""
+    import json as _json
+    import os as _os
+    import sys as _sys
+    path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ADAPTIVE_PARAMS_PATH)
+    try:
+        with open(path, "r", encoding="utf-8") as _fh:
+            data = _json.load(_fh)
+    except (OSError, ValueError):
+        return {}
+    applied = {}
+    for key, value in (data.get("overrides") or {}).items():
+        if key not in ADAPTIVE_WHITELIST:
+            print(f"[config] adaptive override REFUSED (not whitelisted): {key}",
+                  file=_sys.stderr)
+            continue
+        lo, hi = ADAPTIVE_WHITELIST[key]
+        try:
+            clamped = max(lo, min(hi, float(value)))
+        except (TypeError, ValueError):
+            continue
+        if isinstance(globals().get(key), int):
+            clamped = int(round(clamped))
+        globals()[key] = clamped
+        applied[key] = clamped
+    if applied:
+        print(f"[config] adaptive overrides active: {applied} "
+              f"(evidence: {data.get('evidence', '?')})", file=_sys.stderr)
+    return applied
+
+
+_ADAPTIVE_APPLIED = _apply_adaptive_overrides()

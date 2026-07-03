@@ -1,12 +1,12 @@
 {
-  "last_run": "2026-07-02T21:08:04.282369+00:00",
-  "last_routine": "Kill Switch",
-  "status": "halted",
+  "last_run": "2026-07-03T08:30:08.889953+00:00",
+  "last_routine": "Intraday Monitor",
+  "status": "active",
   "review_required": false,
   "flags": [],
-  "trades_today": 2,
-  "portfolio_value": 99833.5,
-  "daily_pnl": 118.66999999999825,
+  "trades_today": 0,
+  "portfolio_value": 99833.45,
+  "daily_pnl": -0.05000000000291038,
   "halted": false,
   "halted_reason": "",
   "halted_at": null

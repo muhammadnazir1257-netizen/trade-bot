@@ -451,3 +451,95 @@ class TestRiskAdjustedWeighting:
     def test_multiplier_capped_at_edge_weight_max(self):
         perfect = self._rec([0.005] * 12)
         assert _se._accuracy_multiplier(perfect) <= config.EDGE_WEIGHT_MAX
+
+
+# --- Self-modification safety (2026-07-03) -------------------------------------
+# The adaptive-override channel is the ONLY way the program changes its own
+# behavior. These tests are the contract: whitelisted keys clamp to bounds,
+# risk-floor keys are structurally impossible to override.
+
+
+class TestAdaptiveOverrides:
+    def _apply(self, overrides: dict) -> dict:
+        import json, tempfile
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        json.dump({"overrides": overrides, "evidence": "unit test"}, tmp)
+        tmp.close()
+        saved_path = config.ADAPTIVE_PARAMS_PATH
+        saved_vals = {k: getattr(config, k) for k in config.ADAPTIVE_WHITELIST}
+        saved_risk = {k: getattr(config, k) for k in
+                      ("CASH_RESERVE_PCT", "MAX_DAILY_LOSS_PCT", "STOP_LOSS_PCT",
+                       "MAX_OPEN_POSITIONS", "MAX_GROSS_EXPOSURE_PCT")}
+        try:
+            config.ADAPTIVE_PARAMS_PATH = os.path.relpath(
+                tmp.name, os.path.dirname(os.path.abspath(config.__file__)))
+            applied = config._apply_adaptive_overrides()
+            current_risk = {k: getattr(config, k) for k in saved_risk}
+            return {"applied": applied, "risk_before": saved_risk,
+                    "risk_after": current_risk}
+        finally:
+            config.ADAPTIVE_PARAMS_PATH = saved_path
+            for k, v in saved_vals.items():
+                setattr(config, k, v)
+            for k, v in saved_risk.items():
+                setattr(config, k, v)
+            os.unlink(tmp.name)
+
+    def test_whitelisted_key_applies_within_bounds(self):
+        r = self._apply({"TRAILING_STOP_ATR_MULT": 0.75})
+        assert r["applied"].get("TRAILING_STOP_ATR_MULT") == 0.75
+
+    def test_out_of_bounds_value_is_clamped(self):
+        r = self._apply({"TRAILING_STOP_ATR_MULT": 99.0})
+        assert r["applied"].get("TRAILING_STOP_ATR_MULT") == 2.0  # whitelist max
+
+    def test_risk_floor_keys_are_refused(self):
+        """THE critical test: the self-modification channel must be
+        structurally unable to touch the risk floor."""
+        r = self._apply({
+            "CASH_RESERVE_PCT": 0.0,        # try to remove the cash reserve
+            "MAX_DAILY_LOSS_PCT": 1.0,      # try to disable the kill switch
+            "STOP_LOSS_PCT": 0.5,           # try to widen stops 60x
+            "MAX_OPEN_POSITIONS": 999,      # try to remove the position cap
+            "MAX_GROSS_EXPOSURE_PCT": 50.0, # try to allow 50x leverage
+        })
+        assert r["applied"] == {}, "no risk key may ever apply"
+        assert r["risk_after"] == r["risk_before"], "risk floor must be untouched"
+
+    def test_unknown_keys_ignored(self):
+        r = self._apply({"TOTALLY_MADE_UP_KEY": 123})
+        assert r["applied"] == {}
+
+    def test_int_keys_stay_int(self):
+        r = self._apply({"TIME_STOP_MINUTES": 120.7})
+        assert r["applied"].get("TIME_STOP_MINUTES") == 121
+        assert isinstance(r["applied"]["TIME_STOP_MINUTES"], int)
+
+
+class TestRollingLearningWindow:
+    def _rec_from_pnls(self, pnls):
+        return {"wins": sum(1 for p in pnls if p > 0),
+                "losses": sum(1 for p in pnls if p <= 0),
+                "trades": [{"pnl_pct": p} for p in pnls]}
+
+    def test_recovered_strategy_comes_off_the_bench(self):
+        """Old regime: 10 losses. Recent regime: 10 solid wins. Lifetime
+        counters say 50% — but the WINDOW must judge the recent form."""
+        saved = config.ROLLING_LEARNING_WINDOW
+        try:
+            config.ROLLING_LEARNING_WINDOW = 10
+            pnls = [-0.005] * 10 + [0.004] * 10   # window sees only the wins
+            rec = self._rec_from_pnls(pnls)
+            assert signal_engine._accuracy_multiplier(rec) > 1.0
+        finally:
+            config.ROLLING_LEARNING_WINDOW = saved
+
+    def test_decayed_strategy_gets_benched_despite_good_lifetime(self):
+        saved = config.ROLLING_LEARNING_WINDOW
+        try:
+            config.ROLLING_LEARNING_WINDOW = 10
+            pnls = [0.004] * 10 + [-0.005] * 10   # window sees only the losses
+            rec = self._rec_from_pnls(pnls)
+            assert signal_engine._accuracy_multiplier(rec) == 0.0
+        finally:
+            config.ROLLING_LEARNING_WINDOW = saved

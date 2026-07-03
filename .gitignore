@@ -32,3 +32,4 @@ intraday_log/state-*.json
 .claude/settings.local.json
 intraday_log/watchdog_state.json
 intraday_log/*.log
+intraday_log/self_improve.log

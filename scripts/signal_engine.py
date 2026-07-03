@@ -316,20 +316,29 @@ def _accuracy_multiplier(record: dict) -> float:
     """
     if not getattr(config, "SELF_LEARNING_ENABLED", True):
         return 1.0
-    wins = int(record.get("wins", 0))
-    losses = int(record.get("losses", 0))
+    # Judge the ROLLING WINDOW, not lifetime totals: a strategy that fixed
+    # itself can earn its way back off the bench, and one that decayed can't
+    # coast on months-old wins. Lifetime counters remain for reporting only.
+    window = getattr(config, "ROLLING_LEARNING_WINDOW", 50)
+    recent = (record.get("trades") or [])[-window:]
+    if recent:
+        wins = sum(1 for t in recent if float(t.get("pnl_pct", 0.0)) > 0)
+        losses = len(recent) - wins
+    else:   # legacy records without a trades list — fall back to counters
+        wins = int(record.get("wins", 0))
+        losses = int(record.get("losses", 0))
     total = wins + losses
     min_trades = getattr(config, "MIN_TRADES_TO_JUDGE", config.ACCURACY_MIN_TRADES)
     if total < min_trades:
         return 1.0
     win_rate = wins / total
-    pf = _profit_factor(record.get("trades", []))
+    pf = _profit_factor(recent if recent else record.get("trades", []))
 
     if win_rate < getattr(config, "AUTO_BENCH_WINRATE", 0.40) or \
        pf < getattr(config, "AUTO_BENCH_PROFIT_FACTOR", 0.9):
         return 0.0  # benched — proven underperformer
 
-    pnls = [float(t.get("pnl_pct", 0.0)) for t in record.get("trades", [])]
+    pnls = [float(t.get("pnl_pct", 0.0)) for t in (recent or record.get("trades", []))]
     mean = sum(pnls) / len(pnls) if pnls else 0.0
     var = (sum((p - mean) ** 2 for p in pnls) / (len(pnls) - 1)) if len(pnls) > 1 else 0.0
     std = var ** 0.5

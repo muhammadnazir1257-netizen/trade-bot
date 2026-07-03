@@ -123,9 +123,10 @@ python scripts/review.py   [review|heartbeat]
 python scripts/notify.py   [journal_path]
 python scripts/analytics.py [report|json] [--archived]   # Sharpe, drawdown, expectancy, per-strategy/side stats
 python scripts/exit_replay.py [--trades]                 # replay real entries through exit-ladder variants
+python scripts/self_improve.py [run|dry-run]             # weekly evidence-gated self-modification cycle
 python scripts/watchdog.py [check|status]                # dead-man's switch (stale heartbeat / halted alerts)
 python scripts/kill_switch.py [status|halt|reset|close-all]
-.venv/Scripts/python.exe -m pytest tests/ -q             # 33-test regression suite (offline, ~0.4s)
+.venv/Scripts/python.exe -m pytest tests/ -q             # 52-test regression suite (offline, ~0.4s)
 ```
 
 ---
@@ -152,5 +153,13 @@ that replay showed would have LOST 4.13% vs +1.43%):
 5. **Small-sample humility:** ~60 closed trades is not proof of edge.
    Re-evaluate with `analytics.py report` at every +50 closed trades;
    only then consider the next tuning iteration.
+6. **Self-modification goes through ONE channel:** `scripts/self_improve.py`
+   (scheduled Sundays, TradeBot-SelfImprove) writes
+   `models/adaptive_params.json` — whitelisted keys only, hard-clamped by
+   `config.ADAPTIVE_WHITELIST`, risk-floor keys structurally refused, full
+   test suite audited after every change (auto-rollback on failure).
+   Delete the JSON file to revert to source defaults instantly. Never
+   edit strategy source to "improve" it without the replay/walk-forward
+   evidence gates — plausible improvements are wrong about half the time.
 
 When in doubt: protect capital, prefer HOLD, and always leave a written record.
