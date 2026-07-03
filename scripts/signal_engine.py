@@ -303,14 +303,16 @@ def _side_multiplier(accuracy: dict, side: str) -> float:
 
 
 def _accuracy_multiplier(record: dict) -> float:
-    """Self-learning weight multiplier from realised performance.
+    """Self-learning weight multiplier from realised RISK-ADJUSTED performance.
 
     - Below MIN_TRADES_TO_JUDGE closed trades → neutral (1.0).
     - Win rate below AUTO_BENCH_WINRATE or profit factor below
       AUTO_BENCH_PROFIT_FACTOR → **benched** (0.0): the strategy stops
       contributing to consensus until it recovers.
-    - Otherwise scaled up toward EDGE_WEIGHT_MAX in proportion to its edge
-      (win rate above 50% and profit factor above 1.0).
+    - Otherwise scaled toward EDGE_WEIGHT_MAX by the strategy's per-trade
+      Sharpe-like ratio (mean pnl / pnl stdev). Two strategies with the
+      same win rate are no longer equal: the one whose wins come with
+      smaller variance earns more voting weight.
     """
     if not getattr(config, "SELF_LEARNING_ENABLED", True):
         return 1.0
@@ -327,9 +329,18 @@ def _accuracy_multiplier(record: dict) -> float:
        pf < getattr(config, "AUTO_BENCH_PROFIT_FACTOR", 0.9):
         return 0.0  # benched — proven underperformer
 
-    edge = max(0.0, win_rate - 0.5) * 2.0          # 0..1 over 50%..100%
-    pf_bonus = max(0.0, pf - 1.0) * 0.5
-    mult = 1.0 + edge + pf_bonus
+    pnls = [float(t.get("pnl_pct", 0.0)) for t in record.get("trades", [])]
+    mean = sum(pnls) / len(pnls) if pnls else 0.0
+    var = (sum((p - mean) ** 2 for p in pnls) / (len(pnls) - 1)) if len(pnls) > 1 else 0.0
+    std = var ** 0.5
+    if std <= 1e-12:
+        sharpe_like = 1.5 if mean > 0 else 0.0
+    else:
+        sharpe_like = mean / std
+    # Map per-trade Sharpe [0 .. 1.5] onto [1.0 .. EDGE_WEIGHT_MAX]; negative
+    # risk-adjusted performance that survived the bench gates stays at 1.0.
+    frac = max(0.0, min(1.0, sharpe_like / 1.5))
+    mult = 1.0 + frac * (getattr(config, "EDGE_WEIGHT_MAX", 2.0) - 1.0)
     return float(max(0.0, min(getattr(config, "EDGE_WEIGHT_MAX", 2.0), mult)))
 
 
