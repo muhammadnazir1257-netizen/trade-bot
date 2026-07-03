@@ -107,6 +107,11 @@ EARNINGS_BLACKOUT_HOURS = 48
 # composite. Combined with chart-pattern boost.
 SENTIMENT_BOOST_MAX = 0.10
 SENTIMENT_MIN_ARTICLES = 3          # Need >= N relevant articles before trusting the score
+# Scheduled macro events (FOMC/CPI — dates published in advance, see
+# external_data.MACRO_EVENTS): new entries within this window are SIZE-HALVED,
+# not blocked. Symbol earnings remain a hard 48h block.
+MACRO_EVENT_REDUCE_HOURS = 24
+MACRO_EVENT_SIZE_FACTOR = 0.5
 # Per-provider cache TTLs (file-cached under models/external_cache/)
 EARNINGS_CACHE_TTL_HOURS = 24
 SENTIMENT_CACHE_TTL_HOURS = 6

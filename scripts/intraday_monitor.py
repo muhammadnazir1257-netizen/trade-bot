@@ -523,8 +523,17 @@ def run_iteration() -> dict[str, Any]:
     for sym in dict.fromkeys([s.upper() for s in symbols] + held_syms + ["SPY"]):
         daily_bars_by_symbol[sym] = research.get_bars(sym, timeframe="1Day", limit=120)
 
-    # Regime classification (once per iteration)
-    regime = market_regime.classify(daily_bars_by_symbol.get("SPY", []))
+    # Regime classification (once per iteration). Breadth = fraction of
+    # watchlist equities above their 20-day SMA, from bars already fetched.
+    breadth_vals = []
+    for _s, _bars in daily_bars_by_symbol.items():
+        if "/" in _s or len(_bars or []) < 21:
+            continue
+        _closes = [float(b["c"]) for b in _bars[-21:]]
+        sma20 = sum(_closes[:-1]) / 20.0
+        breadth_vals.append(1.0 if _closes[-1] > sma20 else 0.0)
+    breadth_pct = (sum(breadth_vals) / len(breadth_vals)) if breadth_vals else None
+    regime = market_regime.classify(daily_bars_by_symbol.get("SPY", []), breadth_pct=breadth_pct)
 
     signals_out: list[dict[str, Any]] = []
     placed_orders: list[dict[str, Any]] = []
@@ -557,10 +566,13 @@ def run_iteration() -> dict[str, Any]:
         strategy_signals = signal_engine.run_all_strategies(
             symbol, bars_1m, bars_5m, bars_1d, account, positions_list)
         patterns = detect_chart_patterns(bars_5m, bars_1d)
-        sentiment_score = external_data.news_sentiment(symbol)
+        senti = external_data.combined_sentiment(symbol)
+        sentiment_score = float(senti.get("value", 0.0))
+        # Confidence-weighted: a strong score on thin coverage boosts less.
         sentiment_boost = float(max(-config.SENTIMENT_BOOST_MAX,
                                     min(config.SENTIMENT_BOOST_MAX,
-                                        sentiment_score * config.SENTIMENT_BOOST_MAX)))
+                                        sentiment_score * senti.get("confidence", 0.0)
+                                        * config.SENTIMENT_BOOST_MAX)))
         total_boost = _patterns_to_boost(patterns) + sentiment_boost
         composite = signal_engine.aggregate_signals(
             strategy_signals, regime["regime"], regime["weights"], total_boost)
@@ -596,6 +608,16 @@ def run_iteration() -> dict[str, Any]:
                 sizing = signal_engine.calculate_position_size(
                     composite, account, regime["regime"], atr_value, symbol, watchlist)
                 qty = sizing["qty"]
+                # Auto-reduce size ahead of scheduled market-wide macro events
+                # (FOMC/CPI). Earnings on the symbol itself are a hard block
+                # above; macro events are a haircut, not a ban.
+                macro_ev = external_data.upcoming_macro_event(
+                    getattr(config, "MACRO_EVENT_REDUCE_HOURS", 24))
+                if macro_ev and qty > 0:
+                    factor = getattr(config, "MACRO_EVENT_SIZE_FACTOR", 0.5)
+                    qty = (math.floor(qty * factor) if not sym_crypto
+                           else round(qty * factor, 6))
+                    sizing["reason"] += f"; halved ahead of {macro_ev['event']} {macro_ev['date']}"
                 entry_price = composite.get("entry_price") or (float(c5[-1]) if len(c5) else 0.0)
                 if qty > 0 and entry_price > 0:
                     limit_price = round(float(entry_price), 2)

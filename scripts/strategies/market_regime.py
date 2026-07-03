@@ -33,8 +33,13 @@ HIGH_VOL_ATR_MULT = 2.0   # ATR > 2× SMA-20 of ATR ⇒ HIGH_VOLATILITY
 EMA_TREND_PERIOD = 50
 
 
-def classify(spy_bars_1d: list[dict]) -> dict[str, Any]:
+def classify(spy_bars_1d: list[dict], breadth_pct: float | None = None) -> dict[str, Any]:
     """Classify the current market regime from SPY daily bars.
+
+    ``breadth_pct`` (optional): fraction of watchlist symbols above their
+    20-day SMA, in [0, 1]. Currently an ANNOTATION input only — label
+    changes based on breadth require replay evidence first (see CLAUDE.md
+    §8 Validation Discipline).
 
     Returns ``{"regime": str, "weights": dict, "details": str}``. ``weights``
     is the regime-specific override mapping from config.
@@ -60,8 +65,16 @@ def classify(spy_bars_1d: list[dict]) -> dict[str, Any]:
 
     high_vol = sma_atr > 0 and last_atr > HIGH_VOL_ATR_MULT * sma_atr
 
+    # Volatility percentile: where today's ATR sits in the trailing window
+    # (VIX itself isn't on the free tier; ATR percentile is the honest proxy).
+    vol_pctile = float((valid_atr < last_atr).mean() * 100) if len(valid_atr) > 20 else float("nan")
+
     details = (f"SPY ${last_close:.2f} vs EMA{EMA_TREND_PERIOD} ${last_ema50:.2f}; "
                f"ADX {last_adx:.1f}; ATR {last_atr:.2f} vs 20-bar avg {sma_atr:.2f}")
+    if not np.isnan(vol_pctile):
+        details += f"; vol pctile {vol_pctile:.0f}"
+    if breadth_pct is not None:
+        details += f"; breadth {breadth_pct:.0%} above 20d SMA"
 
     if high_vol:
         return _regime("HIGH_VOLATILITY", details)
