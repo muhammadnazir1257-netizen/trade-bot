@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from typing import Any
 
 import requests
@@ -75,25 +76,50 @@ def _headers() -> dict[str, str]:
     }
 
 
+_RETRY_STATUSES = (429, 500, 502, 503, 504)
+_MAX_RETRIES = 3
+
+
 def _request(method: str, path: str, params: dict[str, Any] | None = None,
              body: dict[str, Any] | None = None) -> Any:
-    """Perform an authenticated request against the trading API."""
+    """Authenticated request with retry/backoff on transient failures.
+
+    Retries connection errors, 429 rate limits (honoring Retry-After), and
+    5xx responses up to _MAX_RETRIES times. Other 4xx errors (rejections,
+    validation failures) surface immediately — retrying a rejected order
+    blindly is how double-fills happen.
+    """
     url = f"{TRADING_BASE}{path}"
-    try:
-        resp = requests.request(
-            method, url, headers=_headers(), params=params,
-            json=body, timeout=HTTP_TIMEOUT,
-        )
-    except requests.RequestException as exc:
-        raise RuntimeError(f"{method} {url} failed: {exc}") from exc
-    if resp.status_code >= 400:
-        raise RuntimeError(f"{method} {url} -> HTTP {resp.status_code}: {resp.text[:300]}")
-    if not resp.content:
-        return {}
-    try:
-        return resp.json()
-    except ValueError as exc:
-        raise RuntimeError(f"{method} {url} returned non-JSON body") from exc
+    last_err = ""
+    for attempt in range(_MAX_RETRIES):
+        try:
+            resp = requests.request(
+                method, url, headers=_headers(), params=params,
+                json=body, timeout=HTTP_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            last_err = f"{method} {url} failed: {exc}"
+            if attempt < _MAX_RETRIES - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise RuntimeError(last_err) from exc
+        if resp.status_code in _RETRY_STATUSES and attempt < _MAX_RETRIES - 1:
+            try:
+                delay = float(resp.headers.get("Retry-After", "") or 1.5 * (attempt + 1))
+            except ValueError:
+                delay = 1.5 * (attempt + 1)
+            _log(f"HTTP {resp.status_code} on {method} {path}; retrying in {delay:.1f}s")
+            time.sleep(min(delay, 15.0))
+            continue
+        if resp.status_code >= 400:
+            raise RuntimeError(f"{method} {url} -> HTTP {resp.status_code}: {resp.text[:300]}")
+        if not resp.content:
+            return {}
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise RuntimeError(f"{method} {url} returned non-JSON body") from exc
+    raise RuntimeError(last_err or f"{method} {url} exhausted retries")
 
 
 def _load_watchlist() -> dict[str, Any]:

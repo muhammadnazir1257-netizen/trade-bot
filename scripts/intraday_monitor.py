@@ -449,13 +449,61 @@ def run_iteration() -> dict[str, Any]:
     # Key by normalized symbol so "BTC/USD" (orders) matches "BTCUSD" (positions).
     positions_by_sym = {p["symbol"].upper().replace("/", ""): p for p in positions_list}
 
-    # Prune metas whose close order has filled (position gone). Only metas
-    # with a submitted close are pruned — pending-entry metas must survive
-    # until their entry order fills and the position appears.
-    for _k in list(state.get("positions_meta", {}).keys()):
-        _m = state["positions_meta"].get(_k) or {}
+    # --- State reconciliation against the broker (runs every iteration, so
+    # a restart with a lost/stale state file self-heals within one tick) ---
+    metas = state.setdefault("positions_meta", {})
+
+    # 1. Prune metas whose close order has filled (position gone).
+    for _k in list(metas.keys()):
+        _m = metas.get(_k) or {}
         if _m.get("close_order_id") and _k not in positions_by_sym:
-            state["positions_meta"].pop(_k, None)
+            metas.pop(_k, None)
+
+    # 2. Prune stale pending-entry metas: entry placed >60 min ago and no
+    #    position ever appeared. Cancel the resting limit order too —
+    #    crypto entries are GTC and would otherwise rest forever and fill
+    #    at a price the signal no longer supports.
+    for _k in list(metas.keys()):
+        _m = metas.get(_k) or {}
+        if _k in positions_by_sym or _m.get("close_order_id"):
+            continue
+        age = None
+        try:
+            _t0 = datetime.fromisoformat(_m.get("entry_time", ""))
+            age = (datetime.now(timezone.utc) - _t0).total_seconds() / 60.0
+        except (ValueError, TypeError):
+            pass
+        if age is None or age > 60:
+            eid = _m.get("entry_order_id")
+            if eid:
+                try:
+                    trade.cancel_order(eid)
+                except Exception:  # noqa: BLE001
+                    pass
+            metas.pop(_k, None)
+
+    # 3. Adopt orphan positions: a live position with no meta (state file
+    #    lost, manual trade, or partial state). Without adoption the time
+    #    stop never arms (no entry_time) and the position drifts unmanaged.
+    #    Hard stop + trail still derive from avg_entry, so protection is
+    #    complete from the moment of adoption.
+    for _k, _pos in positions_by_sym.items():
+        _qty = float(_pos.get("qty", 0))
+        if abs(_qty) < 1e-6:
+            continue   # unsellable dust — the DUST_HELD path owns it
+        _m = metas.get(_k)
+        if not _m or not _m.get("entry_time"):
+            avg = float(_pos.get("avg_entry_price") or 0.0)
+            metas[_k] = {
+                **(_m or {}),
+                "direction": "long" if _qty > 0 else "short",
+                "entry_time": datetime.now(timezone.utc).isoformat(),
+                "entry_price": avg,
+                "opening_strategies": (_m or {}).get("opening_strategies", []),
+                "reconciled": True,
+            }
+            print(f"[intraday_monitor] adopted orphan position {_k} "
+                  f"(qty {_qty:g} @ {avg})", file=sys.stderr)
 
     # Daily-loss kill switch
     ks_status = kill_switch.check_daily_loss(state["start_equity"], float(account.get("equity", 0.0)))
@@ -573,6 +621,7 @@ def run_iteration() -> dict[str, Any]:
                                 state.setdefault("positions_meta", {})[sym_key] = {
                                     "direction": "long" if side == "buy" else "short",
                                     "entry_time": datetime.now(timezone.utc).isoformat(),
+                                    "entry_order_id": (order or {}).get("id"),
                                     "entry_price": entry_price,
                                     "stop_loss": composite.get("stop_loss"),
                                     "take_profit": composite.get("take_profit"),

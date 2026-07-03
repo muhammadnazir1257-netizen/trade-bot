@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -67,31 +68,45 @@ def _headers() -> dict[str, str]:
     }
 
 
+_RETRY_STATUSES = (429, 500, 502, 503, 504)
+_MAX_RETRIES = 3
+
+
 def _request(base: str, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Perform a GET request against an Alpaca API base.
+    """GET against an Alpaca API base, with retry/backoff on transient errors.
 
-    Args:
-        base: API base URL (trading or data).
-        path: Path beginning with ``/``.
-        params: Optional query parameters.
-
-    Returns:
-        Parsed JSON response.
+    Retries connection failures, 429 rate limits (honoring Retry-After), and
+    5xx responses. Hard 4xx errors surface immediately.
 
     Raises:
-        RuntimeError: on network failure or non-2xx response.
+        RuntimeError: on unrecoverable failure or exhausted retries.
     """
     url = f"{base}{path}"
-    try:
-        resp = requests.get(url, headers=_headers(), params=params, timeout=HTTP_TIMEOUT)
-    except requests.RequestException as exc:  # network-level failure
-        raise RuntimeError(f"GET {url} failed: {exc}") from exc
-    if resp.status_code >= 400:
-        raise RuntimeError(f"GET {url} -> HTTP {resp.status_code}: {resp.text[:300]}")
-    try:
-        return resp.json()
-    except ValueError as exc:
-        raise RuntimeError(f"GET {url} returned non-JSON body") from exc
+    last_err = ""
+    for attempt in range(_MAX_RETRIES):
+        try:
+            resp = requests.get(url, headers=_headers(), params=params, timeout=HTTP_TIMEOUT)
+        except requests.RequestException as exc:  # network-level failure
+            last_err = f"GET {url} failed: {exc}"
+            if attempt < _MAX_RETRIES - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise RuntimeError(last_err) from exc
+        if resp.status_code in _RETRY_STATUSES and attempt < _MAX_RETRIES - 1:
+            try:
+                delay = float(resp.headers.get("Retry-After", "") or 1.5 * (attempt + 1))
+            except ValueError:
+                delay = 1.5 * (attempt + 1)
+            _log(f"HTTP {resp.status_code} on {path}; retrying in {delay:.1f}s")
+            time.sleep(min(delay, 15.0))
+            continue
+        if resp.status_code >= 400:
+            raise RuntimeError(f"GET {url} -> HTTP {resp.status_code}: {resp.text[:300]}")
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise RuntimeError(f"GET {url} returned non-JSON body") from exc
+    raise RuntimeError(last_err or f"GET {url} exhausted retries")
 
 
 # --- Core data functions ---------------------------------------------------

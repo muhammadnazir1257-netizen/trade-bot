@@ -190,12 +190,17 @@ def calculate_position_size(signal: dict[str, Any], account: dict,
     if regime == "HIGH_VOLATILITY":
         pct = config.MIN_POSITION_PCT
 
-    # Respect the per-symbol max_allocation_pct from watchlist
+    # Clamp to the SAME effective cap validate_order enforces:
+    # min(global max_single_position_pct, per-symbol max_allocation_pct).
+    # Sizing above the cap and letting the validator reject it silently
+    # discards otherwise-valid entries (seen live: AAPL 6/3, sized 7.76%
+    # against a 5% cap and rejected instead of resized).
     if watchlist:
         entries = {e["symbol"].upper(): e for e in watchlist.get("watchlist", [])}
-        sym_cap = entries.get(symbol.upper(), {}).get(
-            "max_allocation_pct", config.MAX_POSITION_PCT * 100)
-        pct = min(pct, sym_cap / 100.0)
+        global_cap = float(watchlist.get("max_single_position_pct", 5))
+        sym_cap = float(entries.get(symbol.upper(), {}).get(
+            "max_allocation_pct", config.MAX_POSITION_PCT * 100))
+        pct = min(pct, global_cap / 100.0, sym_cap / 100.0)
 
     # ATR-based volatility scaling: tighter risk in high ATR → smaller size
     if atr_value and atr_value > 0:
