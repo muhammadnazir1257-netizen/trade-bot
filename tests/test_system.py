@@ -311,3 +311,143 @@ class TestAnalytics:
 
     def test_return_metrics_empty(self):
         assert analytics.return_metrics([])["sharpe"] is None
+
+
+# --- Phase 1-3 additions (2026-07-03) -----------------------------------------
+
+
+import external_data  # noqa: E402
+import signal_engine as _se  # noqa: E402
+
+
+class TestSizingCapClamp:
+    """Sizing must clamp to the SAME cap validate_order enforces — sizing
+    above it silently discards valid entries via rejection (AAPL 6/3 live)."""
+
+    _WL = {"max_single_position_pct": 5,
+           "watchlist": [{"symbol": "AAPL", "max_allocation_pct": 8},
+                          {"symbol": "MARA", "max_allocation_pct": 4}]}
+    _ACCT = {"equity": 100000.0, "cash": 100000.0}
+
+    def test_global_cap_binds(self):
+        sig = {"confidence": 0.9, "entry_price": 100.0}
+        r = _se.calculate_position_size(sig, self._ACCT, "TRENDING_UP", 0.5, "AAPL", self._WL)
+        assert r["pct_of_equity"] <= 0.05 + 1e-9
+
+    def test_symbol_cap_binds_when_tighter(self):
+        sig = {"confidence": 0.9, "entry_price": 100.0}
+        r = _se.calculate_position_size(sig, self._ACCT, "TRENDING_UP", 0.1, "MARA", self._WL)
+        assert r["pct_of_equity"] <= 0.04 + 1e-9
+
+    def test_sizing_uses_live_equity(self):
+        """Compounding: same signal sizes larger on a larger account."""
+        sig = {"confidence": 0.5, "entry_price": 100.0}
+        small = _se.calculate_position_size(sig, {"equity": 50000.0, "cash": 50000.0},
+                                            "RANGING", 0.1, "AAPL", self._WL)
+        large = _se.calculate_position_size(sig, {"equity": 200000.0, "cash": 200000.0},
+                                            "RANGING", 0.1, "AAPL", self._WL)
+        assert large["notional"] > small["notional"] * 3.5
+
+
+class TestMaxOpenPositions:
+    def setup_method(self):
+        self._real_status = trade.get_market_status
+        self._real_account = trade._get_account
+        trade.get_market_status = lambda: {"is_open": True, "next_open": "", "next_close": ""}
+        trade._get_account = lambda: {"cash": 100000.0}
+        self._wl = {"max_single_position_pct": 5,
+                    "watchlist": [{"symbol": "SPY", "max_allocation_pct": 5}]}
+
+    def teardown_method(self):
+        trade.get_market_status = self._real_status
+        trade._get_account = self._real_account
+
+    def test_new_symbol_rejected_at_cap(self):
+        positions = [{"symbol": f"P{i}", "qty": 10, "market_value": 1000.0} for i in range(8)]
+        ok, why = trade.validate_order("SPY", 10, "buy", 100.0, 100000, positions, self._wl)
+        assert not ok and "Max-open-positions" in why
+
+    def test_add_to_held_symbol_allowed_at_cap(self):
+        positions = ([{"symbol": f"P{i}", "qty": 10, "market_value": 1000.0} for i in range(7)]
+                     + [{"symbol": "SPY", "qty": 5, "market_value": 500.0}])
+        ok, _ = trade.validate_order("SPY", 10, "buy", 100.0, 100000, positions, self._wl)
+        assert ok
+
+    def test_dust_not_counted(self):
+        positions = ([{"symbol": f"P{i}", "qty": 10, "market_value": 1000.0} for i in range(7)]
+                     + [{"symbol": "BTCUSD", "qty": 1e-9, "market_value": 0.0}])
+        ok, _ = trade.validate_order("SPY", 10, "buy", 100.0, 100000, positions, self._wl)
+        assert ok
+
+
+class TestExternalDataSignals:
+    def test_stocktwits_symbol_mapping(self):
+        assert external_data._stocktwits_symbol("BTC/USD") == "BTC.X"
+        assert external_data._stocktwits_symbol("aapl") == "AAPL"
+
+    def test_macro_event_window(self):
+        from datetime import datetime, timezone, timedelta
+        saved = external_data.MACRO_EVENTS
+        try:
+            soon = (datetime.now(timezone.utc) + timedelta(hours=5)).strftime("%Y-%m-%d")
+            far = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+            external_data.MACRO_EVENTS = [{"date": far, "event": "CPI release"}]
+            assert external_data.upcoming_macro_event(24) is None
+            external_data.MACRO_EVENTS = [{"date": soon, "event": "FOMC rate decision"}]
+            ev = external_data.upcoming_macro_event(48)
+            # Event at 14:00 UTC on that date — may be inside or outside the
+            # 48h window depending on time of day; widen to make deterministic
+            ev = external_data.upcoming_macro_event(72)
+            assert ev is not None and ev["event"] == "FOMC rate decision"
+        finally:
+            external_data.MACRO_EVENTS = saved
+
+    def test_combined_sentiment_fails_open(self):
+        saved_av = external_data.news_sentiment
+        saved_st = external_data.stocktwits_sentiment
+        saved_news = external_data.alpaca_news_count
+        try:
+            external_data.news_sentiment = lambda s: 0.0
+            external_data.stocktwits_sentiment = lambda s: {"value": 0.0, "confidence": 0.0}
+            external_data.alpaca_news_count = lambda s: 0
+            out = external_data.combined_sentiment("TEST")
+            assert out["value"] == 0.0 and out["confidence"] == 0.0
+            assert "asof" in out
+        finally:
+            external_data.news_sentiment = saved_av
+            external_data.stocktwits_sentiment = saved_st
+            external_data.alpaca_news_count = saved_news
+
+    def test_combined_sentiment_blends(self):
+        saved_av = external_data.news_sentiment
+        saved_st = external_data.stocktwits_sentiment
+        saved_news = external_data.alpaca_news_count
+        try:
+            external_data.news_sentiment = lambda s: 0.5
+            external_data.stocktwits_sentiment = lambda s: {"value": -0.5, "confidence": 0.6}
+            external_data.alpaca_news_count = lambda s: 10
+            out = external_data.combined_sentiment("TEST")
+            assert -1.0 <= out["value"] <= 1.0
+            assert 0.0 < out["confidence"] <= 1.0
+        finally:
+            external_data.news_sentiment = saved_av
+            external_data.stocktwits_sentiment = saved_st
+            external_data.alpaca_news_count = saved_news
+
+
+class TestRiskAdjustedWeighting:
+    def _rec(self, pnls):
+        return {"wins": sum(1 for p in pnls if p > 0),
+                "losses": sum(1 for p in pnls if p <= 0),
+                "trades": [{"pnl_pct": p} for p in pnls]}
+
+    def test_low_variance_beats_high_variance_at_same_win_rate(self):
+        steady = self._rec([0.004, 0.004, 0.004, -0.003, 0.004,
+                            -0.003, 0.004, 0.004, -0.003, 0.004])
+        choppy = self._rec([0.02, -0.015, 0.018, -0.012, 0.02,
+                            -0.016, 0.019, 0.02, -0.014, 0.001])
+        assert _se._accuracy_multiplier(steady) > _se._accuracy_multiplier(choppy)
+
+    def test_multiplier_capped_at_edge_weight_max(self):
+        perfect = self._rec([0.005] * 12)
+        assert _se._accuracy_multiplier(perfect) <= config.EDGE_WEIGHT_MAX
