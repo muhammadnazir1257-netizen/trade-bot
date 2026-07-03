@@ -327,6 +327,29 @@ def tune_strategy_params(strategy_module, symbol: str) -> dict[str, Any]:
             runs.append(r)
             if best is None or (r.get("sharpe_annualized", 0) or 0) > (best.get("sharpe_annualized", 0) or 0):
                 best = r
+
+        # Walk-forward acceptance gate: the winning params must ALSO be
+        # profitable on the recent half-window re-run in isolation. A param
+        # set that only works in one window is curve-fit — reject it so
+        # apply_optimized_params never ships it to live trading.
+        if best is not None:
+            for k, v in (best.get("params") or {}).items():
+                if hasattr(strategy_module, k):
+                    setattr(strategy_module, k, v)
+            recent = backtest_strategy(strategy_module, symbol, lookback_days=30)
+            wf_ok = (
+                (best.get("profit_factor") or 0) >= 1.0
+                and (best.get("trades") or 0) >= 10
+                and (recent.get("profit_factor") or 0) >= 1.0
+                and (recent.get("trades") or 0) >= 5
+            )
+            best["walk_forward"] = {
+                "recent_pf": recent.get("profit_factor"),
+                "recent_trades": recent.get("trades"),
+                "accepted": wf_ok,
+            }
+            if not wf_ok:
+                best = None
     finally:
         for k, v in saved.items():
             setattr(strategy_module, k, v)
