@@ -205,10 +205,14 @@ class TestSideMultiplier:
 
 
 class TestAccuracyMultiplier:
-    def test_benched_below_winrate_floor(self):
+    def test_benched_strategy_gets_probation_weight(self):
+        """Bench = probation (small exploration weight), NOT 0.0: zero weight
+        froze records forever — by 7/6 it had silenced 5 of 7 strategies."""
         rec = {"wins": 3, "losses": 7,
                "trades": [{"pnl_pct": 0.001}] * 3 + [{"pnl_pct": -0.002}] * 7}
-        assert signal_engine._accuracy_multiplier(rec) == 0.0
+        m = signal_engine._accuracy_multiplier(rec)
+        assert m == config.PROBATION_WEIGHT
+        assert 0.0 < m < 0.5, "probation must be small but nonzero"
 
     def test_neutral_below_min_trades(self):
         rec = {"wins": 1, "losses": 1,
@@ -540,6 +544,69 @@ class TestRollingLearningWindow:
             config.ROLLING_LEARNING_WINDOW = 10
             pnls = [0.004] * 10 + [-0.005] * 10   # window sees only the losses
             rec = self._rec_from_pnls(pnls)
-            assert signal_engine._accuracy_multiplier(rec) == 0.0
+            assert signal_engine._accuracy_multiplier(rec) == config.PROBATION_WEIGHT
         finally:
             config.ROLLING_LEARNING_WINDOW = saved
+
+
+# --- Firm-analyst fixes (2026-07-07) --------------------------------------------
+
+
+class TestRiskBasedSizing:
+    _WL = {"max_single_position_pct": 5,
+           "watchlist": [{"symbol": "SPY", "max_allocation_pct": 15}]}
+    _ACCT = {"equity": 100000.0, "cash": 100000.0}
+
+    def test_wide_stop_means_small_position(self):
+        """Risk sizing binds when the stop is wide: with a 0.25% risk budget,
+        an 8%-away stop caps notional at ~3.1% of equity (below the 4% base);
+        a 2% stop leaves the notional cap binding instead. Either way the
+        loss at the stop can never exceed the risk budget + cap geometry."""
+        sig_wide = {"confidence": 0.5, "entry_price": 100.0, "stop_loss": 92.0}   # 8% away
+        sig_tight = {"confidence": 0.5, "entry_price": 100.0, "stop_loss": 98.0}  # 2% away
+        wide = signal_engine.calculate_position_size(
+            sig_wide, self._ACCT, "RANGING", 0.5, "SPY", self._WL)
+        tight = signal_engine.calculate_position_size(
+            sig_tight, self._ACCT, "RANGING", 0.5, "SPY", self._WL)
+        assert wide["notional"] < tight["notional"], \
+            "wider stop must produce the smaller position"
+        # Loss if the wide trade stops out ~ 0.25% of equity, not 0.32% (4% x 8%)
+        risk_at_stop = wide["notional"] * 0.08
+        assert risk_at_stop <= 0.0026 * 100000 + 1e-6
+
+    def test_risk_sizing_never_exceeds_notional_caps(self):
+        sig = {"confidence": 0.9, "entry_price": 100.0, "stop_loss": 99.9}  # paper-thin... 0.1%
+        r = signal_engine.calculate_position_size(
+            sig, self._ACCT, "TRENDING_UP", 0.5, "SPY", self._WL)
+        assert r["pct_of_equity"] <= 0.05 + 1e-9, "caps must bound risk sizing"
+
+    def test_no_stop_falls_back_to_notional(self):
+        sig = {"confidence": 0.5, "entry_price": 100.0}
+        r = signal_engine.calculate_position_size(
+            sig, self._ACCT, "RANGING", 0.5, "SPY", self._WL)
+        assert r["notional"] > 0 and "notional" in r["reason"]
+
+
+class TestProbationKeepsLearning:
+    def test_benched_voter_still_reaches_owners(self):
+        """The death-spiral fix: a benched strategy voting on the winning side
+        must appear in opening_strategies (weight > 0) so its record keeps
+        accruing evidence."""
+        benched_trades = [{"pnl_pct": 0.001}] * 3 + [{"pnl_pct": -0.002}] * 7
+        import json, tempfile
+        tracker = {"strat_benched": {"wins": 3, "losses": 7, "trades": benched_trades}}
+        saved = signal_engine._load_accuracy_tracker
+        try:
+            signal_engine._load_accuracy_tracker = lambda: tracker
+            signals = [
+                {"strategy": "strat_benched", "signal": "SELL", "confidence": 0.9,
+                 "reason": "t", "entry_price": 100.0, "stop_loss": 101.0, "take_profit": 97.0},
+                {"strategy": "strat_new", "signal": "SELL", "confidence": 0.9,
+                 "reason": "t", "entry_price": 100.0, "stop_loss": 101.0, "take_profit": 97.0},
+            ]
+            out = signal_engine.aggregate_signals(signals, "RANGING", {}, 0.0)
+            assert out["signal"] == "SELL"
+            assert "strat_benched" in out.get("opening_strategies", []), \
+                "probationed strategy must keep earning evidence"
+        finally:
+            signal_engine._load_accuracy_tracker = saved

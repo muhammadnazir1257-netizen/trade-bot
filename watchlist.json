@@ -12,6 +12,19 @@
     { "symbol": "RIOT", "asset_class": "us_equity", "universe": "smallcap", "description": "Crypto miner — high-beta small cap", "max_allocation_pct": 4 },
     { "symbol": "MARA", "asset_class": "us_equity", "universe": "smallcap", "description": "Crypto miner — high-beta small cap", "max_allocation_pct": 4 },
 
+    { "symbol": "AMD",  "asset_class": "us_equity", "universe": "largecap", "description": "Semis — high-beta AI complement to NVDA", "max_allocation_pct": 6 },
+    { "symbol": "TSLA", "asset_class": "us_equity", "universe": "largecap", "description": "EV/megacap — deep liquidity, wide intraday range", "max_allocation_pct": 6 },
+    { "symbol": "META", "asset_class": "us_equity", "universe": "largecap", "description": "Megacap tech — ad/AI exposure", "max_allocation_pct": 6 },
+    { "symbol": "GOOGL","asset_class": "us_equity", "universe": "largecap", "description": "Megacap tech — search/cloud", "max_allocation_pct": 6 },
+    { "symbol": "AMZN", "asset_class": "us_equity", "universe": "largecap", "description": "Megacap — retail/cloud", "max_allocation_pct": 6 },
+    { "symbol": "COIN", "asset_class": "us_equity", "universe": "smallcap", "description": "Crypto exchange — high-beta, pairs with BTC signals", "max_allocation_pct": 4 },
+    { "symbol": "PLTR", "asset_class": "us_equity", "universe": "smallcap", "description": "High-beta software — active intraday name", "max_allocation_pct": 4 },
+
+    { "symbol": "XLF",  "asset_class": "us_equity", "universe": "sector_etf", "description": "Financials sector ETF — diversifier vs tech-heavy list", "max_allocation_pct": 8 },
+    { "symbol": "XLE",  "asset_class": "us_equity", "universe": "sector_etf", "description": "Energy sector ETF — low correlation to tech", "max_allocation_pct": 8 },
+    { "symbol": "GLD",  "asset_class": "us_equity", "universe": "sector_etf", "description": "Gold ETF — regime diversifier", "max_allocation_pct": 8 },
+    { "symbol": "TLT",  "asset_class": "us_equity", "universe": "sector_etf", "description": "20y Treasury ETF — rates leg, negative-corr candidate", "max_allocation_pct": 8 },
+
     { "symbol": "BTC/USD", "asset_class": "crypto", "universe": "crypto", "description": "Bitcoin — 24/7, less efficient than equities", "max_allocation_pct": 6 },
     { "symbol": "ETH/USD", "asset_class": "crypto", "universe": "crypto", "description": "Ethereum — 24/7", "max_allocation_pct": 5 },
     { "symbol": "LTC/USD", "asset_class": "crypto", "universe": "crypto", "description": "Litecoin — 24/7, smaller cap crypto", "max_allocation_pct": 3 }

@@ -20,6 +20,16 @@ MAX_POSITION_PCT = 0.08              # was 0.04 — 8% for high-confidence in tr
 MIN_POSITION_PCT = 0.015             # was 0.01 — slightly larger floor in HIGH_VOLATILITY
 CASH_RESERVE_PCT = 0.20              # SACRED — always keep 20% cash
 
+# Fixed-fractional RISK sizing (2026-07-07): when the signal carries a stop,
+# size so the stop-out loses a constant fraction of equity — the professional
+# standard. Fixed-notional sizing made per-trade risk vary wildly with stop
+# distance (tight stop = trivial risk, wide stop = oversized risk). The
+# notional caps above and the watchlist caps still bound the position; risk
+# sizing only decides the target within them.
+RISK_SIZING_ENABLED = True
+RISK_PER_TRADE_PCT = 0.0025          # 0.25% of equity at the stop
+RISK_PER_TRADE_MAX_PCT = 0.004       # ceiling after confidence/regime scaling
+
 # --- Risk management ---------------------------------------------------------
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║ IMMUTABLE RISK FLOOR — no strategy, tuning pass, or "improvement" may     ║
@@ -84,6 +94,13 @@ SELF_LEARNING_ENABLED = True
 MIN_TRADES_TO_JUDGE = 8              # was 10 — judge sooner so winners get amplified faster
 AUTO_BENCH_WINRATE = 0.45            # was 0.40 — kill underperforming strategies more aggressively
 AUTO_BENCH_PROFIT_FACTOR = 1.0       # was 0.9 — require PF >= 1.0 to keep voting
+# Bandit-style exploration (2026-07-07): bench used to mean weight 0.0, which
+# froze the strategy's record forever (never credited on new trades → no way
+# back). By 7/6 that death-spiral had benched 5 of 7 strategies and the
+# ensemble produced 1 signal in 101 iterations. Probation keeps a benched
+# strategy voting at a small weight so it keeps generating evidence and can
+# earn its way back through the rolling window.
+PROBATION_WEIGHT = 0.2
 EDGE_WEIGHT_MAX = 3.0                # was 2.0 — concentrate harder on proven winners
 APPLY_OPTIMIZED_PARAMS = True        # Load models/optimized_params.json into strategies at runtime
 MAX_DAILY_TRADES_AGGRESSIVE = 20     # informational — pair with MAX_DAILY_TRADES below if cranking

@@ -190,6 +190,23 @@ def calculate_position_size(signal: dict[str, Any], account: dict,
     if regime == "HIGH_VOLATILITY":
         pct = config.MIN_POSITION_PCT
 
+    # Fixed-fractional risk sizing: when the signal has a stop, target a
+    # constant equity risk at that stop instead of constant notional. The
+    # notional pct caps below still bound the result — risk sizing decides
+    # the target WITHIN the caps, never above them.
+    risk_notional = None
+    stop = float(signal.get("stop_loss") or 0.0)
+    if getattr(config, "RISK_SIZING_ENABLED", False) and stop > 0 and price > 0:
+        stop_dist = abs(price - stop)
+        if stop_dist > price * 0.0005:      # ignore degenerate paper-thin stops
+            risk_pct = config.RISK_PER_TRADE_PCT
+            if confidence >= 0.80 and regime in ("TRENDING_UP", "TRENDING_DOWN"):
+                risk_pct *= 1.5             # conviction bumps the risk budget
+            if regime == "HIGH_VOLATILITY":
+                risk_pct *= 0.6
+            risk_pct = min(risk_pct, getattr(config, "RISK_PER_TRADE_MAX_PCT", 0.004))
+            risk_notional = (risk_pct * equity) / (stop_dist / price)
+
     # Clamp to the SAME effective cap validate_order enforces:
     # min(global max_single_position_pct, per-symbol max_allocation_pct).
     # Sizing above the cap and letting the validator reject it silently
@@ -209,6 +226,10 @@ def calculate_position_size(signal: dict[str, Any], account: dict,
             pct *= 0.5
 
     target_notional = pct * equity
+    if risk_notional is not None:
+        # Risk target, bounded by the notional cap: min() guarantees risk
+        # sizing can never exceed what the caps would have allowed.
+        target_notional = min(risk_notional, target_notional)
 
     # Cash reserve enforcement
     min_cash = config.CASH_RESERVE_PCT * equity
@@ -222,11 +243,12 @@ def calculate_position_size(signal: dict[str, Any], account: dict,
     else:
         qty = math.floor(target_notional / price)        # whole shares
     notional = qty * price
+    mode = "risk-based" if risk_notional is not None else "notional"
     return {
         "qty": float(qty) if crypto else int(qty),
         "notional": float(notional),
         "pct_of_equity": float(notional / equity) if equity else 0.0,
-        "reason": (f"size {pct*100:.2f}% of equity (conf {confidence:.2f}, regime {regime}) "
+        "reason": (f"{mode} size (conf {confidence:.2f}, regime {regime}, cap {pct*100:.2f}%) "
                    f"→ {qty} units × ${price:.2f} = ${notional:,.2f}"),
     }
 
@@ -336,7 +358,11 @@ def _accuracy_multiplier(record: dict) -> float:
 
     if win_rate < getattr(config, "AUTO_BENCH_WINRATE", 0.40) or \
        pf < getattr(config, "AUTO_BENCH_PROFIT_FACTOR", 0.9):
-        return 0.0  # benched — proven underperformer
+        # Probation, not execution: a zero weight freezes the record forever
+        # (benched voters are never credited on new closes, so they can never
+        # redeem themselves). A small exploration weight keeps evidence
+        # flowing — standard bandit exploration/exploitation practice.
+        return float(getattr(config, "PROBATION_WEIGHT", 0.2))
 
     pnls = [float(t.get("pnl_pct", 0.0)) for t in (recent or record.get("trades", []))]
     mean = sum(pnls) / len(pnls) if pnls else 0.0
