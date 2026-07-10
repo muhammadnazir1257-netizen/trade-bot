@@ -610,3 +610,21 @@ class TestProbationKeepsLearning:
                 "probationed strategy must keep earning evidence"
         finally:
             signal_engine._load_accuracy_tracker = saved
+
+
+class TestZeroAvgEntryOutage:
+    """2026-07-08/09 outage: broker returned avg_entry_price=0 on a dust
+    position; monitor_position divided by it and crashed EVERY tick for two
+    trading days. These encode the fix."""
+
+    def test_zero_avg_entry_holds_instead_of_crashing(self):
+        pos = {"qty": 1e-9, "avg_entry_price": 0.0, "current_price": 62000.0}
+        assert im.monitor_position("BTCUSD", pos, {"c": 62000.0}, 5.0, {}) == "HOLD"
+
+    def test_missing_avg_entry_holds(self):
+        pos = {"qty": 10, "current_price": 100.0}
+        assert im.monitor_position("T", pos, {"c": 100.0}, 0.4, {}) == "HOLD"
+
+    def test_none_avg_entry_holds(self):
+        pos = {"qty": 10, "avg_entry_price": None, "current_price": 100.0}
+        assert im.monitor_position("T", pos, {"c": 100.0}, 0.4, {}) == "HOLD"

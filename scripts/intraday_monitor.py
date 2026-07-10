@@ -338,7 +338,12 @@ def monitor_position(symbol: str, position: dict, current_bar: dict,
     qty = float(position.get("qty", 0))      # signed: + long, - short
     if qty == 0 or current_price <= 0:
         return "HOLD"
-    avg_entry = float(position.get("avg_entry_price", current_price))
+    avg_entry = float(position.get("avg_entry_price") or 0.0)
+    if avg_entry <= 0:
+        # Broker occasionally reports avg_entry_price=0 on micro/dust
+        # positions (seen live 7/8 — the division below crashed every tick
+        # for two days). No entry price → no basis for stop math → HOLD.
+        return "HOLD"
     is_long = qty > 0
     take_profit = float(meta.get("take_profit") or 0.0)
 
@@ -657,27 +662,38 @@ def run_iteration() -> dict[str, Any]:
                         else:
                             action_taken = f"REJECTED:{why}"
 
-        # MANAGE existing position — long or short
+        # MANAGE existing position — long or short. Dust is skipped BEFORE any
+        # monitoring math: on 7/8 a dust remnant came back from the broker
+        # with avg_entry_price=0 and the division inside monitor_position
+        # crashed every tick for two days (bot fully down 7/8-7/9).
         if sym_key in positions_by_sym:
             position = positions_by_sym[sym_key]
+            qty_held_pre = float(position.get("qty", 0))
             meta = state.setdefault("positions_meta", {}).setdefault(sym_key, {})
             last_bar = (bars_1m or bars_5m or [{"c": position.get("current_price", 0)}])[-1]
+            if abs(qty_held_pre) < 1e-6:
+                decision = "DUST"
             # In the close-only window, force-flatten EQUITIES (no overnight
             # exposure) unless flagged swing. Crypto trades 24/7 — never EOD-flattened.
-            if (phase == "close_only" and not config.OVERNIGHT_ALLOWED
+            elif (phase == "close_only" and not config.OVERNIGHT_ALLOWED
                     and not sym_crypto and not meta.get("swing", False)):
                 decision = "CLOSE_EOD"
             else:
-                decision = monitor_position(symbol, position, last_bar, atr_value or 0.0, meta)
-            if decision in ("CLOSE_STOP", "CLOSE_PROFIT", "CLOSE_TIME", "CLOSE_EOD"):
+                try:
+                    decision = monitor_position(symbol, position, last_bar, atr_value or 0.0, meta)
+                except Exception as exc:  # noqa: BLE001 — one bad position must
+                    # never kill the whole tick; log and keep the loop alive.
+                    print(f"[intraday_monitor] monitor_position({symbol}) failed: {exc}",
+                          file=sys.stderr)
+                    decision = "HOLD"
+                    action_taken = f"MONITOR_ERROR:{exc}"
+            if decision == "DUST":
+                action_taken = "DUST_HELD"
+                state.get("positions_meta", {}).pop(sym_key, None)
+            elif decision in ("CLOSE_STOP", "CLOSE_PROFIT", "CLOSE_TIME", "CLOSE_EOD"):
                 current_price = float(position.get("current_price") or last_bar.get("c", 0))
                 qty_held = float(position.get("qty", 0))     # signed
-                # Skip dust positions: tiny leftover crypto fractions that can't
-                # be meaningfully closed and would just spam errors each tick.
-                if sym_crypto and abs(qty_held) < 1e-6:
-                    action_taken = "DUST_HELD"
-                    state.get("positions_meta", {}).pop(sym_key, None)
-                elif qty_held != 0 and current_price > 0:
+                if qty_held != 0 and current_price > 0:
                     # Pending-close guard: a limit close that hasn't filled yet
                     # must not trigger a second close (Alpaca rejects it as a
                     # wash trade / insufficient qty — seen live on MARA 6/11).
