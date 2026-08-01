@@ -163,12 +163,18 @@ def run(dry_run: bool = False) -> dict[str, Any]:
     new_trades = n_trades - last_n
     report_lines += [f"- Closed trades: {n_trades} (+{new_trades} since last cycle)"]
 
-    # Snapshot for rollback
+    # Snapshot for rollback — BOTH files the cycle can write. (7/19+7/26:
+    # rollback restored adaptive_params but not optimized_params, so a
+    # "rolled back" tuner acceptance silently survived.)
     adaptive_path = os.path.join(_ROOT, config.ADAPTIVE_PARAMS_PATH)
-    backup = adaptive_path + ".bak"
-    had_overrides = os.path.exists(adaptive_path)
-    if had_overrides:
-        shutil.copy2(adaptive_path, backup)
+    optimized_path = os.path.join(_ROOT, config.OPTIMIZED_PARAMS_PATH)
+    backups: dict[str, str | None] = {}
+    for p in (adaptive_path, optimized_path):
+        if os.path.exists(p):
+            shutil.copy2(p, p + ".bak")
+            backups[p] = p + ".bak"
+        else:
+            backups[p] = None
 
     if new_trades < MIN_NEW_TRADES:
         report_lines += [f"- DECISION: insufficient new evidence "
@@ -208,11 +214,12 @@ def run(dry_run: bool = False) -> dict[str, Any]:
         if _run_tests():
             report_lines += ["", f"## Applied changes: {changes}", "- test suite: PASS"]
         else:
-            # Roll back everything this cycle touched
-            if had_overrides:
-                shutil.copy2(backup, adaptive_path)
-            elif os.path.exists(adaptive_path):
-                os.remove(adaptive_path)
+            # Roll back EVERYTHING this cycle touched (both param files)
+            for p, bak in backups.items():
+                if bak:
+                    shutil.copy2(bak, p)
+                elif os.path.exists(p):
+                    os.remove(p)
             report_lines += ["", "## ROLLBACK: test suite failed after changes — "
                              "all overrides reverted. Investigate before next cycle."]
             changes = ["ROLLED BACK (tests failed)"]

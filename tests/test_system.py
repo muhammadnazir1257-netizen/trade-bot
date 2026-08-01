@@ -185,8 +185,8 @@ class TestSideMultiplier:
         assert signal_engine._side_multiplier(_tracker("BUY", 5, 5), "BUY") == 1.0
 
     def test_weak_side_clamped_at_floor(self):
-        acc = _tracker("BUY", 6, 24)   # 20% win rate over 30
-        assert signal_engine._side_multiplier(acc, "BUY") == 0.80
+        acc = _tracker("BUY", 6, 24)   # 20% win rate over 30 -> raw 0.55, floor 0.60
+        assert signal_engine._side_multiplier(acc, "BUY") == 0.60
 
     def test_strong_side_clamped_at_ceiling(self):
         acc = _tracker("SELL", 27, 3)  # 90% win rate over 30
@@ -390,17 +390,21 @@ class TestExternalDataSignals:
         assert external_data._stocktwits_symbol("aapl") == "AAPL"
 
     def test_macro_event_window(self):
+        """DETERMINISTIC version. The original used now+5h formatted as a
+        date-only string; events resolve to 14:00 UTC on that date, so when
+        the suite ran after 14:00 UTC (e.g. the Sunday self-improve cycle at
+        16:00 UTC) the 'future' event was already past -> flaky failure that
+        false-rolled-back two legitimate tuner acceptances (7/19, 7/26)."""
         from datetime import datetime, timezone, timedelta
         saved = external_data.MACRO_EVENTS
         try:
-            soon = (datetime.now(timezone.utc) + timedelta(hours=5)).strftime("%Y-%m-%d")
+            # +26h guarantees the date is tomorrow-or-later, so 14:00 UTC on
+            # that date is always in the future and always within 72h.
+            soon = (datetime.now(timezone.utc) + timedelta(hours=26)).strftime("%Y-%m-%d")
             far = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
             external_data.MACRO_EVENTS = [{"date": far, "event": "CPI release"}]
             assert external_data.upcoming_macro_event(24) is None
             external_data.MACRO_EVENTS = [{"date": soon, "event": "FOMC rate decision"}]
-            ev = external_data.upcoming_macro_event(48)
-            # Event at 14:00 UTC on that date — may be inside or outside the
-            # 48h window depending on time of day; widen to make deterministic
             ev = external_data.upcoming_macro_event(72)
             assert ev is not None and ev["event"] == "FOMC rate decision"
         finally:

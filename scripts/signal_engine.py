@@ -321,7 +321,11 @@ def _side_multiplier(accuracy: dict, side: str) -> float:
         return 1.0
     win_rate = sum(1 for p in pnls if p > 0) / len(pnls)
     mult = 1.0 + (win_rate - 0.50) * 1.5   # 50% win rate → neutral
-    return max(0.80, min(1.15, mult))
+    # Floor widened 0.80 → 0.60 on 2026-08-01: by then the sample was 309
+    # deduped closes with a persistent split (longs 35% win / PF 0.78 over
+    # 161, shorts 50% / PF 1.56 over 148) — strong enough evidence to let
+    # the weak side shrink harder than the original conservative clamp.
+    return max(0.60, min(1.15, mult))
 
 
 def _accuracy_multiplier(record: dict) -> float:
