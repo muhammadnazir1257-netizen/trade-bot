@@ -65,6 +65,19 @@ def _today_et_str() -> str:
     return _now_et().strftime("%Y-%m-%d")
 
 
+def _in_reentry_cooldown(state: dict, sym_key: str) -> bool:
+    """True if this symbol stopped out less than REENTRY_COOLDOWN_MINUTES ago."""
+    ts = (state.get("last_stop") or {}).get(sym_key)
+    if not ts:
+        return False
+    try:
+        t0 = datetime.fromisoformat(ts)
+        age_min = (datetime.now(timezone.utc) - t0).total_seconds() / 60.0
+    except (ValueError, TypeError):
+        return False
+    return age_min < getattr(config, "REENTRY_COOLDOWN_MINUTES", 45)
+
+
 def _in_midday_window() -> bool:
     """True during the midday no-entry window (ET). See MIDDAY_NO_ENTRY."""
     try:
@@ -542,6 +555,7 @@ def run_iteration() -> dict[str, Any]:
 
     signals_out: list[dict[str, Any]] = []
     placed_orders: list[dict[str, Any]] = []
+    entry_candidates: list[dict[str, Any]] = []
 
     for symbol in symbols:
         sym_crypto = research.is_crypto(symbol)
@@ -608,6 +622,10 @@ def run_iteration() -> dict[str, Any]:
                 # them lifted replay cum P&L from +1.43% to +3.69%. Composite
                 # confidence showed no predictive power in this window.
                 action_taken = "SKIPPED:midday_window"
+            elif _in_reentry_cooldown(state, sym_key):
+                # 7/7 incident: symbols were re-entered minutes after stopping
+                # out (IJR/MARA/GLD churn). One stop = the thesis failed; wait.
+                action_taken = "SKIPPED:reentry_cooldown"
             else:
                 side = "buy" if composite["signal"] == "BUY" else "sell"
                 sizing = signal_engine.calculate_position_size(
@@ -625,42 +643,19 @@ def run_iteration() -> dict[str, Any]:
                     sizing["reason"] += f"; halved ahead of {macro_ev['event']} {macro_ev['date']}"
                 entry_price = composite.get("entry_price") or (float(c5[-1]) if len(c5) else 0.0)
                 if qty > 0 and entry_price > 0:
-                    limit_price = round(float(entry_price), 2)
-                    pos_snapshot = [{"symbol": p["symbol"], "qty": float(p["qty"]),
-                                     "market_value": float(p["market_value"])} for p in positions_list]
-                    # Correlation-cluster gate (fail-open if data missing)
-                    corr_ok, corr_reason = signal_engine.check_correlation_exposure(
-                        symbol, sizing["notional"], pos_snapshot,
-                        float(account.get("equity", 0.0)), daily_bars_by_symbol)
-                    if not corr_ok:
-                        action_taken = f"REJECTED:{corr_reason}"
-                    else:
-                        ok, why = trade.validate_order(
-                            symbol, qty, side, limit_price,
-                            float(account.get("equity", 0.0)), pos_snapshot, watchlist)
-                        if ok:
-                            try:
-                                order = trade.place_order(symbol, qty, side, limit_price)
-                                order_info = {"order": order, "sizing": sizing}
-                                action_taken = "SHORT_OPENED" if side == "sell" else "ORDER_PLACED"
-                                placed_orders.append(order)
-                                state["trades_today"] = int(state.get("trades_today", 0)) + 1
-                                state.setdefault("positions_meta", {})[sym_key] = {
-                                    "direction": "long" if side == "buy" else "short",
-                                    "entry_time": datetime.now(timezone.utc).isoformat(),
-                                    "entry_order_id": (order or {}).get("id"),
-                                    "entry_price": entry_price,
-                                    "stop_loss": composite.get("stop_loss"),
-                                    "take_profit": composite.get("take_profit"),
-                                    "peak_price": entry_price,
-                                    "trough_price": entry_price,
-                                    "trailing_stop": None,
-                                    "opening_strategies": composite.get("opening_strategies", []),
-                                }
-                            except Exception as exc:  # noqa: BLE001
-                                action_taken = f"ORDER_FAILED:{exc}"
-                        else:
-                            action_taken = f"REJECTED:{why}"
+                    # Two-phase entry (7/7 burst incident: 7 orders fired in
+                    # ONE tick when the midday gate lifted). Candidates are
+                    # collected here; after the scan the top
+                    # MAX_NEW_ENTRIES_PER_TICK by confidence actually trade.
+                    action_taken = "ENTRY_CANDIDATE"
+                    entry_candidates.append({
+                        "symbol": symbol, "sym_key": sym_key, "sym_crypto": sym_crypto,
+                        "side": side, "qty": qty,
+                        "limit_price": round(float(entry_price), 2),
+                        "entry_price": entry_price,
+                        "confidence": float(composite.get("confidence", 0.0)),
+                        "composite": composite, "sizing": sizing,
+                    })
 
         # MANAGE existing position — long or short. Dust is skipped BEFORE any
         # monitoring math: on 7/8 a dust remnant came back from the broker
@@ -731,6 +726,10 @@ def run_iteration() -> dict[str, Any]:
                             placed_orders.append(order)
                             meta["close_order_id"] = (order or {}).get("id")
                             meta["close_submitted_at"] = datetime.now(timezone.utc).isoformat()
+                            if decision == "CLOSE_STOP":
+                                # Re-entry cooldown clock (7/7 churn incident)
+                                state.setdefault("last_stop", {})[sym_key] = (
+                                    datetime.now(timezone.utc).isoformat())
                             # Accuracy close-loop: realised P&L → credit/charge each
                             # strategy that voted to open this position. Guarded so
                             # a re-placed close can't double-record the outcome.
@@ -772,6 +771,59 @@ def run_iteration() -> dict[str, Any]:
             "action_taken": action_taken,
             "order_id": (order_info.get("order", {}) or {}).get("id") if order_info else None,
         })
+
+    # --- Phase 2: execute the best entry candidates, capped per tick --------
+    # Sorting by confidence turns a signal burst into selectivity: the 7/7
+    # incident showed 7 simultaneous entries each passing per-order checks
+    # against a near-empty book. Sequential execution + cap ends that race.
+    cap = int(getattr(config, "MAX_NEW_ENTRIES_PER_TICK", 2))
+    entry_candidates.sort(key=lambda c: c["confidence"], reverse=True)
+    rows_by_symbol = {r["symbol"]: r for r in signals_out}
+    executed = 0
+    for cand in entry_candidates:
+        row = rows_by_symbol.get(cand["symbol"])
+        if row is None:
+            continue
+        if executed >= cap or state.get("trades_today", 0) >= config.MAX_DAILY_TRADES:
+            row["action_taken"] = "SKIPPED:tick_entry_cap"
+            continue
+        pos_snapshot = [{"symbol": p["symbol"], "qty": float(p["qty"]),
+                         "market_value": float(p["market_value"])} for p in positions_list]
+        corr_ok, corr_reason = signal_engine.check_correlation_exposure(
+            cand["symbol"], cand["sizing"]["notional"], pos_snapshot,
+            float(account.get("equity", 0.0)), daily_bars_by_symbol)
+        if not corr_ok:
+            row["action_taken"] = f"REJECTED:{corr_reason}"
+            continue
+        ok, why = trade.validate_order(
+            cand["symbol"], cand["qty"], cand["side"], cand["limit_price"],
+            float(account.get("equity", 0.0)), pos_snapshot, watchlist)
+        if not ok:
+            row["action_taken"] = f"REJECTED:{why}"
+            continue
+        try:
+            order = trade.place_order(cand["symbol"], cand["qty"], cand["side"],
+                                      cand["limit_price"])
+        except Exception as exc:  # noqa: BLE001
+            row["action_taken"] = f"ORDER_FAILED:{exc}"
+            continue
+        executed += 1
+        placed_orders.append(order)
+        row["action_taken"] = "SHORT_OPENED" if cand["side"] == "sell" else "ORDER_PLACED"
+        row["order_id"] = (order or {}).get("id")
+        state["trades_today"] = int(state.get("trades_today", 0)) + 1
+        state.setdefault("positions_meta", {})[cand["sym_key"]] = {
+            "direction": "long" if cand["side"] == "buy" else "short",
+            "entry_time": datetime.now(timezone.utc).isoformat(),
+            "entry_order_id": (order or {}).get("id"),
+            "entry_price": cand["entry_price"],
+            "stop_loss": cand["composite"].get("stop_loss"),
+            "take_profit": cand["composite"].get("take_profit"),
+            "peak_price": cand["entry_price"],
+            "trough_price": cand["entry_price"],
+            "trailing_stop": None,
+            "opening_strategies": cand["composite"].get("opening_strategies", []),
+        }
 
     _save_state(state)
     entry = {

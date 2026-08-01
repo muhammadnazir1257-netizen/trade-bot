@@ -57,7 +57,7 @@
           }
         }
       ],
-      "updated_at": "2026-07-03T08:29:20.254216+00:00"
+      "updated_at": "2026-07-26T16:01:42.926038+00:00"
     },
     "QQQ": {
       "best": null,
@@ -116,7 +116,7 @@
           }
         }
       ],
-      "updated_at": "2026-07-03T08:29:30.702816+00:00"
+      "updated_at": "2026-07-26T16:01:53.686002+00:00"
     }
   },
   "momentum_breakout": {
@@ -127,19 +127,19 @@
           "symbol": "SPY",
           "strategy": "momentum_breakout",
           "lookback_days_requested": 60,
-          "bars_used": 2120,
+          "bars_used": 2069,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 25,
-          "win_rate": 0.36,
-          "avg_win_pct": 0.0030164145379185576,
-          "avg_loss_pct": -0.0048847678877759915,
-          "profit_factor": 0.3473518530584065,
-          "max_drawdown_pct": 0.05699271473731216,
-          "sharpe_annualized": -6.668904843188732,
-          "total_return_pct": -0.05100855536314885,
+          "trades": 15,
+          "win_rate": 0.4,
+          "avg_win_pct": 0.0039291336977933435,
+          "avg_loss_pct": -0.00637911501301369,
+          "profit_factor": 0.4106247433776972,
+          "max_drawdown_pct": 0.025153993774299804,
+          "sharpe_annualized": -6.57501046478656,
+          "total_return_pct": -0.033837232930363156,
           "params": {
             "VOLUME_MULT_TRIGGER": 1.3
           }
@@ -148,19 +148,19 @@
           "symbol": "SPY",
           "strategy": "momentum_breakout",
           "lookback_days_requested": 60,
-          "bars_used": 2120,
+          "bars_used": 2069,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 22,
-          "win_rate": 0.4090909090909091,
-          "avg_win_pct": 0.002665327983229526,
-          "avg_loss_pct": -0.005647983474104067,
-          "profit_factor": 0.3267054646624041,
-          "max_drawdown_pct": 0.053746622651823395,
-          "sharpe_annualized": -7.071642232214142,
-          "total_return_pct": -0.04943583331428716,
+          "trades": 14,
+          "win_rate": 0.42857142857142855,
+          "avg_win_pct": 0.0033249044487790977,
+          "avg_loss_pct": -0.00693532149529764,
+          "profit_factor": 0.35956203880023635,
+          "max_drawdown_pct": 0.026849906113643185,
+          "sharpe_annualized": -7.381793021220968,
+          "total_return_pct": -0.03553314526970654,
           "params": {
             "VOLUME_MULT_TRIGGER": 1.5
           }
@@ -169,19 +169,19 @@
           "symbol": "SPY",
           "strategy": "momentum_breakout",
           "lookback_days_requested": 60,
-          "bars_used": 2120,
+          "bars_used": 2069,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 22,
-          "win_rate": 0.4090909090909091,
-          "avg_win_pct": 0.002727621545385824,
-          "avg_loss_pct": -0.005836634274057007,
-          "profit_factor": 0.32353464152589756,
-          "max_drawdown_pct": 0.05563844099180493,
-          "sharpe_annualized": -7.205668177947843,
-          "total_return_pct": -0.051327651654268676,
+          "trades": 14,
+          "win_rate": 0.42857142857142855,
+          "avg_win_pct": 0.0033427380680524465,
+          "avg_loss_pct": -0.006831876929043767,
+          "profit_factor": 0.36696409743291997,
+          "max_drawdown_pct": 0.025915347867972102,
+          "sharpe_annualized": -7.233055595201825,
+          "total_return_pct": -0.034598587024035454,
           "params": {
             "VOLUME_MULT_TRIGGER": 1.8
           }
@@ -190,51 +190,76 @@
           "symbol": "SPY",
           "strategy": "momentum_breakout",
           "lookback_days_requested": 60,
-          "bars_used": 2120,
+          "bars_used": 2069,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 21,
-          "win_rate": 0.42857142857142855,
-          "avg_win_pct": 0.0028844224304413715,
-          "avg_loss_pct": -0.005462571635589486,
-          "profit_factor": 0.39602534614588675,
-          "max_drawdown_pct": 0.04841564410211385,
-          "sharpe_annualized": -5.9327586881313445,
-          "total_return_pct": -0.03959105775310149,
+          "trades": 11,
+          "win_rate": 0.5454545454545454,
+          "avg_win_pct": 0.0033427380680524465,
+          "avg_loss_pct": -0.0064064395301705905,
+          "profit_factor": 0.6261333870041419,
+          "max_drawdown_pct": 0.015787578158676,
+          "sharpe_annualized": -3.35768147863118,
+          "total_return_pct": -0.011975769242538275,
           "params": {
             "VOLUME_MULT_TRIGGER": 2.0
           },
           "walk_forward": {
-            "recent_pf": 0.39602534614588675,
-            "recent_trades": 21,
+            "recent_pf": 0.6261333870041419,
+            "recent_trades": 11,
             "accepted": false
           }
         }
       ],
-      "updated_at": "2026-07-03T08:30:19.216958+00:00"
+      "updated_at": "2026-07-26T16:02:41.741909+00:00"
     },
     "QQQ": {
-      "best": null,
+      "best": {
+        "symbol": "QQQ",
+        "strategy": "momentum_breakout",
+        "lookback_days_requested": 60,
+        "bars_used": 2199,
+        "cost_model": {
+          "slippage_bps_per_side": 5.0,
+          "commission_per_share": 0.0
+        },
+        "trades": 16,
+        "win_rate": 0.625,
+        "avg_win_pct": 0.004163126794112986,
+        "avg_loss_pct": -0.005624759853599046,
+        "profit_factor": 1.2335717146066771,
+        "max_drawdown_pct": 0.018328286125770955,
+        "sharpe_annualized": 1.3529977257908328,
+        "total_return_pct": 0.007882708819535587,
+        "params": {
+          "VOLUME_MULT_TRIGGER": 1.5
+        },
+        "walk_forward": {
+          "recent_pf": 1.2335717146066771,
+          "recent_trades": 16,
+          "accepted": true
+        }
+      },
       "runs": [
         {
           "symbol": "QQQ",
           "strategy": "momentum_breakout",
           "lookback_days_requested": 60,
-          "bars_used": 2186,
+          "bars_used": 2199,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 22,
-          "win_rate": 0.4090909090909091,
-          "avg_win_pct": 0.004381181883088232,
-          "avg_loss_pct": -0.005509387665565328,
-          "profit_factor": 0.5505377554058632,
-          "max_drawdown_pct": 0.047494413476149216,
-          "sharpe_annualized": -4.140347857187348,
-          "total_return_pct": -0.03219140270455515,
+          "trades": 23,
+          "win_rate": 0.5652173913043478,
+          "avg_win_pct": 0.0033696388252687295,
+          "avg_loss_pct": -0.005371236227304987,
+          "profit_factor": 0.8155534941063792,
+          "max_drawdown_pct": 0.028760174883831677,
+          "sharpe_annualized": -1.279667833091629,
+          "total_return_pct": -0.0099070575445564,
           "params": {
             "VOLUME_MULT_TRIGGER": 1.3
           }
@@ -243,72 +268,72 @@
           "symbol": "QQQ",
           "strategy": "momentum_breakout",
           "lookback_days_requested": 60,
-          "bars_used": 2186,
+          "bars_used": 2199,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 18,
-          "win_rate": 0.4444444444444444,
-          "avg_win_pct": 0.004330989555463503,
-          "avg_loss_pct": -0.006368777721668184,
-          "profit_factor": 0.5440277233389241,
-          "max_drawdown_pct": 0.04158180389851979,
-          "sharpe_annualized": -4.26864909618129,
-          "total_return_pct": -0.02903986077297383,
+          "trades": 16,
+          "win_rate": 0.625,
+          "avg_win_pct": 0.004163126794112986,
+          "avg_loss_pct": -0.005624759853599046,
+          "profit_factor": 1.2335717146066771,
+          "max_drawdown_pct": 0.018328286125770955,
+          "sharpe_annualized": 1.3529977257908328,
+          "total_return_pct": 0.007882708819535587,
           "params": {
             "VOLUME_MULT_TRIGGER": 1.5
-          }
-        },
-        {
-          "symbol": "QQQ",
-          "strategy": "momentum_breakout",
-          "lookback_days_requested": 60,
-          "bars_used": 2186,
-          "cost_model": {
-            "slippage_bps_per_side": 5.0,
-            "commission_per_share": 0.0
-          },
-          "trades": 12,
-          "win_rate": 0.5,
-          "avg_win_pct": 0.0058919079319102105,
-          "avg_loss_pct": -0.00618540517238749,
-          "profit_factor": 0.9525500379849825,
-          "max_drawdown_pct": 0.015908448244229313,
-          "sharpe_annualized": -0.3550874172347383,
-          "total_return_pct": -0.001760983442863677,
-          "params": {
-            "VOLUME_MULT_TRIGGER": 1.8
           },
           "walk_forward": {
-            "recent_pf": 0.9525500379849825,
-            "recent_trades": 12,
-            "accepted": false
+            "recent_pf": 1.2335717146066771,
+            "recent_trades": 16,
+            "accepted": true
           }
         },
         {
           "symbol": "QQQ",
           "strategy": "momentum_breakout",
           "lookback_days_requested": 60,
-          "bars_used": 2186,
+          "bars_used": 2199,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 8,
-          "win_rate": 0.5,
-          "avg_win_pct": 0.003926172240821404,
-          "avg_loss_pct": -0.005371423942270115,
-          "profit_factor": 0.7309369513593248,
-          "max_drawdown_pct": 0.00865078191520352,
-          "sharpe_annualized": -2.3159773011021123,
-          "total_return_pct": -0.0057810068057948475,
+          "trades": 14,
+          "win_rate": 0.6428571428571429,
+          "avg_win_pct": 0.0036823732809788895,
+          "avg_loss_pct": -0.00607454621512858,
+          "profit_factor": 1.0911550708519386,
+          "max_drawdown_pct": 0.01946624592455114,
+          "sharpe_annualized": 0.5471314666823034,
+          "total_return_pct": 0.002768628453167103,
+          "params": {
+            "VOLUME_MULT_TRIGGER": 1.8
+          }
+        },
+        {
+          "symbol": "QQQ",
+          "strategy": "momentum_breakout",
+          "lookback_days_requested": 60,
+          "bars_used": 2199,
+          "cost_model": {
+            "slippage_bps_per_side": 5.0,
+            "commission_per_share": 0.0
+          },
+          "trades": 13,
+          "win_rate": 0.6153846153846154,
+          "avg_win_pct": 0.0041400724201387925,
+          "avg_loss_pct": -0.005813558417895508,
+          "profit_factor": 1.1394253563929921,
+          "max_drawdown_pct": 0.017615624214580804,
+          "sharpe_annualized": 0.8406460475118793,
+          "total_return_pct": 0.004052787271632798,
           "params": {
             "VOLUME_MULT_TRIGGER": 2.0
           }
         }
       ],
-      "updated_at": "2026-07-03T08:31:11.087876+00:00"
+      "updated_at": "2026-07-26T16:03:35.247310+00:00"
     }
   },
   "rsi_divergence": {
@@ -319,19 +344,19 @@
           "symbol": "SPY",
           "strategy": "rsi_divergence",
           "lookback_days_requested": 60,
-          "bars_used": 2120,
+          "bars_used": 2069,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 8,
+          "trades": 4,
           "win_rate": 0.5,
-          "avg_win_pct": 0.0010841720530457045,
-          "avg_loss_pct": -0.002345109472637766,
-          "profit_factor": 0.46231191579565534,
-          "max_drawdown_pct": 0.009307344670212141,
-          "sharpe_annualized": -4.0287013899825155,
-          "total_return_pct": -0.005043749678368246,
+          "avg_win_pct": 0.0006206238622656278,
+          "avg_loss_pct": -0.0022776572158080322,
+          "profit_factor": 0.27248343515354323,
+          "max_drawdown_pct": 0.004357584657445211,
+          "sharpe_annualized": -6.336309406894458,
+          "total_return_pct": -0.0033140667070848087,
           "params": {
             "VOLUME_CONFIRM_MULT": 1.0,
             "MIN_DIVERGENCE_SPAN": 4
@@ -341,53 +366,42 @@
           "symbol": "SPY",
           "strategy": "rsi_divergence",
           "lookback_days_requested": 60,
-          "bars_used": 2120,
-          "cost_model": {
-            "slippage_bps_per_side": 5.0,
-            "commission_per_share": 0.0
-          },
-          "trades": 4,
-          "win_rate": 0.75,
-          "avg_win_pct": 0.0009659826208919137,
-          "avg_loss_pct": -0.005962992727126617,
-          "profit_factor": 0.4859888306575503,
-          "max_drawdown_pct": 0.005962992727126617,
-          "sharpe_annualized": -3.967298570717511,
-          "total_return_pct": -0.0030650448644508757,
-          "params": {
-            "VOLUME_CONFIRM_MULT": 1.2,
-            "MIN_DIVERGENCE_SPAN": 5
-          }
-        },
-        {
-          "symbol": "SPY",
-          "strategy": "rsi_divergence",
-          "lookback_days_requested": 60,
-          "bars_used": 2120,
+          "bars_used": 2069,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
           "trades": 1,
           "win_rate": 1.0,
-          "avg_win_pct": 0.0011067045873492686,
+          "avg_win_pct": 0.000319013886471087,
           "avg_loss_pct": 0.0,
           "profit_factor": Infinity,
           "max_drawdown_pct": 0.0,
           "sharpe_annualized": 0.0,
-          "total_return_pct": 0.0011067045873492686,
+          "total_return_pct": 0.000319013886471087,
           "params": {
-            "VOLUME_CONFIRM_MULT": 1.5,
-            "MIN_DIVERGENCE_SPAN": 6
+            "VOLUME_CONFIRM_MULT": 1.2,
+            "MIN_DIVERGENCE_SPAN": 5
           },
           "walk_forward": {
             "recent_pf": Infinity,
             "recent_trades": 1,
             "accepted": false
           }
+        },
+        {
+          "symbol": "SPY",
+          "strategy": "rsi_divergence",
+          "trades": 0,
+          "win_rate": null,
+          "profit_factor": null,
+          "params": {
+            "VOLUME_CONFIRM_MULT": 1.5,
+            "MIN_DIVERGENCE_SPAN": 6
+          }
         }
       ],
-      "updated_at": "2026-07-03T08:31:25.191384+00:00"
+      "updated_at": "2026-07-26T16:03:49.442803+00:00"
     },
     "QQQ": {
       "best": null,
@@ -396,19 +410,19 @@
           "symbol": "QQQ",
           "strategy": "rsi_divergence",
           "lookback_days_requested": 60,
-          "bars_used": 2186,
+          "bars_used": 2199,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 12,
-          "win_rate": 0.5833333333333334,
-          "avg_win_pct": 0.0012661951443745836,
-          "avg_loss_pct": -0.004463797811335132,
-          "profit_factor": 0.3971221988646046,
-          "max_drawdown_pct": 0.012757183059789701,
-          "sharpe_annualized": -5.723478897737868,
-          "total_return_pct": -0.013455623046053576,
+          "trades": 15,
+          "win_rate": 0.6,
+          "avg_win_pct": 0.0006525323025318602,
+          "avg_loss_pct": -0.003118865293745439,
+          "profit_factor": 0.31383158989285914,
+          "max_drawdown_pct": 0.015310573599156635,
+          "sharpe_annualized": -6.114234213056164,
+          "total_return_pct": -0.012840401039685895,
           "params": {
             "VOLUME_CONFIRM_MULT": 1.0,
             "MIN_DIVERGENCE_SPAN": 4
@@ -418,19 +432,19 @@
           "symbol": "QQQ",
           "strategy": "rsi_divergence",
           "lookback_days_requested": 60,
-          "bars_used": 2186,
+          "bars_used": 2199,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 7,
-          "win_rate": 0.5714285714285714,
-          "avg_win_pct": 0.0007916807952661913,
-          "avg_loss_pct": -0.005237472034435735,
-          "profit_factor": 0.20154272648101668,
-          "max_drawdown_pct": 0.014964986840587995,
-          "sharpe_annualized": -8.827347259600613,
-          "total_return_pct": -0.012545692922242436,
+          "trades": 8,
+          "win_rate": 0.75,
+          "avg_win_pct": 0.0005129633085299919,
+          "avg_loss_pct": -0.0037921643809639433,
+          "profit_factor": 0.4058078107887296,
+          "max_drawdown_pct": 0.006240931284224714,
+          "sharpe_annualized": -4.628704346818589,
+          "total_return_pct": -0.004506548910747936,
           "params": {
             "VOLUME_CONFIRM_MULT": 1.2,
             "MIN_DIVERGENCE_SPAN": 5
@@ -440,31 +454,31 @@
           "symbol": "QQQ",
           "strategy": "rsi_divergence",
           "lookback_days_requested": 60,
-          "bars_used": 2186,
+          "bars_used": 2199,
           "cost_model": {
             "slippage_bps_per_side": 5.0,
             "commission_per_share": 0.0
           },
-          "trades": 3,
-          "win_rate": 0.6666666666666666,
-          "avg_win_pct": 0.002558690563202443,
-          "avg_loss_pct": -0.0029852063580591936,
-          "profit_factor": 1.7142470277103081,
-          "max_drawdown_pct": 0.0029852063580591936,
-          "sharpe_annualized": 4.063885796320212,
-          "total_return_pct": 0.0021321747683456928,
+          "trades": 4,
+          "win_rate": 0.75,
+          "avg_win_pct": 0.0015236185162399924,
+          "avg_loss_pct": -0.0029033583024699948,
+          "profit_factor": 1.5743339514214902,
+          "max_drawdown_pct": 0.0029033583024699948,
+          "sharpe_annualized": 2.831687832026912,
+          "total_return_pct": 0.001667497246249982,
           "params": {
             "VOLUME_CONFIRM_MULT": 1.5,
             "MIN_DIVERGENCE_SPAN": 6
           },
           "walk_forward": {
-            "recent_pf": 1.7142470277103081,
-            "recent_trades": 3,
+            "recent_pf": 1.5743339514214902,
+            "recent_trades": 4,
             "accepted": false
           }
         }
       ],
-      "updated_at": "2026-07-03T08:31:39.851550+00:00"
+      "updated_at": "2026-07-26T16:04:04.692246+00:00"
     }
   }
 }

@@ -628,3 +628,26 @@ class TestZeroAvgEntryOutage:
     def test_none_avg_entry_holds(self):
         pos = {"qty": 10, "avg_entry_price": None, "current_price": 100.0}
         assert im.monitor_position("T", pos, {"c": 100.0}, 0.4, {}) == "HOLD"
+
+
+class TestEntryDiscipline:
+    """7/7 burst incident: 7 entries in one tick, 20 in 40 min, -$315."""
+
+    def test_reentry_cooldown_blocks_within_window(self):
+        from datetime import datetime, timezone, timedelta
+        recent = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        state = {"last_stop": {"MARA": recent}}
+        assert im._in_reentry_cooldown(state, "MARA") is True
+
+    def test_reentry_cooldown_expires(self):
+        from datetime import datetime, timezone, timedelta
+        old = (datetime.now(timezone.utc) - timedelta(minutes=90)).isoformat()
+        state = {"last_stop": {"MARA": old}}
+        assert im._in_reentry_cooldown(state, "MARA") is False
+
+    def test_no_stop_history_no_cooldown(self):
+        assert im._in_reentry_cooldown({}, "SPY") is False
+
+    def test_entry_cap_config_present(self):
+        assert 1 <= config.MAX_NEW_ENTRIES_PER_TICK <= 5
+        assert config.REENTRY_COOLDOWN_MINUTES >= 30

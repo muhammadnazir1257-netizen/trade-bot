@@ -134,6 +134,14 @@ EARNINGS_CACHE_TTL_HOURS = 24
 SENTIMENT_CACHE_TTL_HOURS = 6
 EXTERNAL_CACHE_DIR = "models/external_cache"
 
+# --- Entry discipline (from the 2026-07-07 burst incident) ------------------
+# The minute the midday gate lifted, 7 entries fired in ONE tick (20 in 40
+# minutes) into 2pm chop — each passed per-order risk checks against a
+# near-empty book, but collectively it was one correlated bet. 18 of 20
+# stopped out within ~15 minutes (-$315).
+MAX_NEW_ENTRIES_PER_TICK = 2         # top-N by composite confidence; rest wait
+REENTRY_COOLDOWN_MINUTES = 45        # no re-entry in a symbol after its stop-out
+
 # --- Intraday loop ---------------------------------------------------------
 POLL_INTERVAL_SECONDS = 60           # Long-running loop sleep between iterations
 ORB_MINUTES = 30                     # Opening Range duration (9:30–10:00 ET)
